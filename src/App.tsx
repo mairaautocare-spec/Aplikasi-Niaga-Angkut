@@ -15,6 +15,7 @@ import {
 import { DaftarRitaseView } from './components/DaftarRitaseView';
 import { DashboardTab } from './components/DashboardTab';
 import { NotaVendorTab } from './components/NotaVendorTab';
+import { OfflineIndicator, PWAInstallButton } from './components/PWAInstallButton';
 import { TambahRitaseView } from './components/TambahRitaseView';
 import { VendorTab } from './components/VendorTab';
 import { useTransportStore } from './hooks/useTransportStore';
@@ -281,6 +282,13 @@ export default function App() {
 
       {/* Arsip & Pengelolaan Data di bawah Sidebar */}
       <div className="border-t border-slate-800 p-4 space-y-2">
+        <PWAInstallButton
+          variant="sidebar"
+          onInstalled={() =>
+            showToast('Aplikasi NiagaAngkut berhasil diinstall ke perangkat Anda!')
+          }
+        />
+
         <button
           type="button"
           onClick={handleBackupJson}
@@ -357,6 +365,13 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            <PWAInstallButton
+              variant="header"
+              onInstalled={() =>
+                showToast('Aplikasi NiagaAngkut berhasil diinstall ke perangkat Anda!')
+              }
+            />
+
             <button
               type="button"
               onClick={() => {
@@ -520,6 +535,8 @@ export default function App() {
           </div>
         </div>
       )}
+
+      <OfflineIndicator />
 
       {toastMessage && (
         <div

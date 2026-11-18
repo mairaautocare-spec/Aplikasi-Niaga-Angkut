@@ -1,0 +1,6 @@
+{
+  "name": "NiagaAngkut — Pendataan & Nota Transportasi Curah",
+  "description": "Aplikasi operasional broker transportasi barang curah multi-vendor untuk pencatatan ritase, susut timbangan, profit, serta cetak rincian ongkos pembayaran vendor.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

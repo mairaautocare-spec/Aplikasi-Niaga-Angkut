@@ -20,6 +20,15 @@ function migrateLegacyRitase(raw: Record<string, unknown>): Ritase {
       ? 'Sudah Dibayar Pusat'
       : 'Belum Dibayar Pusat';
 
+  const rawTol = raw.toleransiSusutPersen;
+  const toleransiSusutPersen =
+    rawTol !== undefined &&
+    rawTol !== null &&
+    String(rawTol).trim() !== '' &&
+    !Number.isNaN(Number(rawTol))
+      ? Math.max(0, Number(rawTol))
+      : 0.3;
+
   return {
     id: String(raw.id || generateId('rit')),
     tanggalMuat: String(raw.tanggalMuat || getTodayIso()),
@@ -34,6 +43,9 @@ function migrateLegacyRitase(raw: Record<string, unknown>): Ritase {
     hargaPusatPerKg: hargaPusat,
     hargaJualVendorPerKg: hargaVendor,
     uangJalan,
+    sumberUangJalan: raw.sumberUangJalan === 'Pusat' ? 'Pusat' : 'Broker',
+    biayaKartuGto: Math.max(0, Number(raw.biayaKartuGto) || 0),
+    toleransiSusutPersen,
     docStatus:
       raw.docStatus === 'SJ & Tiket Timbang Lengkap'
         ? 'SJ & Tiket Timbang Lengkap'
@@ -131,6 +143,26 @@ export function useTransportStore() {
           ...r,
           ...payload,
           paidAt: payload.vendorPaymentStatus === 'Lunas' ? r.paidAt || today : undefined,
+          updatedAt: today,
+        };
+      }),
+    }));
+  };
+
+  const updateRitaseTimbangan = (
+    id: string,
+    beratMuatKg: number,
+    beratBongkarKg: number
+  ) => {
+    const today = getTodayIso();
+    setDb((prev) => ({
+      ...prev,
+      ritase: prev.ritase.map((r) => {
+        if (r.id !== id) return r;
+        return {
+          ...r,
+          beratMuatKg: Math.max(0, Number(beratMuatKg) || 0),
+          beratBongkarKg: Math.max(0, Number(beratBongkarKg) || 0),
           updatedAt: today,
         };
       }),
@@ -271,6 +303,7 @@ export function useTransportStore() {
     deleteVendor,
     addRitase,
     updateRitase,
+    updateRitaseTimbangan,
     deleteRitase,
     toggleDocStatus,
     toggleVendorPaymentStatus,

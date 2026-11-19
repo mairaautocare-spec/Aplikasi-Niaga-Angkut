@@ -138,11 +138,18 @@ export interface NotaClaimDetailItem {
   beratBongkarKg: number;
   susutAktualKg: number;
   susutPersen: number;
-  toleransi03Kg: number;
+  toleransiPersen: number;
+  toleransiKg: number;
   susutKenaClaimKg: number;
   kenaClaim: boolean;
   hargaClaimPerKg: number;
   claimSusutRp: number;
+}
+
+export interface NotaGtoDetailItem {
+  nopol: string;
+  tanggalMuat: string;
+  biayaKartuGto: number;
 }
 
 export interface ExportNotaExcelParams {
@@ -153,11 +160,12 @@ export interface ExportNotaExcelParams {
   isAllVendors: boolean;
   vendorMap: Map<string, Vendor>;
   items: Ritase[];
-  ritaseDetails: NotaClaimDetailItem[];
+  claimItems: NotaClaimDetailItem[];
   totalTonase: number;
   totalJumlahOngkos: number;
   totalUangJalan: number;
   gtoVal: number;
+  gtoItems: NotaGtoDetailItem[];
   adaClaim: boolean;
   claimCount: number;
   totalClaimSusutRp: number;
@@ -173,11 +181,12 @@ export async function exportNotaVendorExcel(params: ExportNotaExcelParams): Prom
     isAllVendors,
     vendorMap,
     items,
-    ritaseDetails,
+    claimItems,
     totalTonase,
     totalJumlahOngkos,
     totalUangJalan,
     gtoVal,
+    gtoItems,
     adaClaim,
     claimCount,
     totalClaimSusutRp,
@@ -186,6 +195,7 @@ export async function exportNotaVendorExcel(params: ExportNotaExcelParams): Prom
 
   const totalCols = isAllVendors ? 12 : 11;
   const labelSpan = isAllVendors ? 8 : 7;
+  const claimCols = isAllVendors ? 13 : 12;
 
   const columns: SheetOptionsColumn[] = isAllVendors
     ? [
@@ -201,6 +211,7 @@ export async function exportNotaVendorExcel(params: ExportNotaExcelParams): Prom
         { width: 15 },
         { width: 20 },
         { width: 18 },
+        { width: 18 },
       ]
     : [
         { width: 6 },
@@ -213,6 +224,7 @@ export async function exportNotaVendorExcel(params: ExportNotaExcelParams): Prom
         { width: 15 },
         { width: 15 },
         { width: 20 },
+        { width: 18 },
         { width: 18 },
       ];
 
@@ -326,24 +338,36 @@ export async function exportNotaVendorExcel(params: ExportNotaExcelParams): Prom
     { value: totalUangJalan, type: Number, format: FORMAT_RP, align: 'right', ...TOTAL_CELL_BASE },
   ]);
 
-  // Summary Row 2: Biaya Reistrasi Kartu GTO
-  rows.push([
-    ...makeSpannedCellBlock('Biaya Reistrasi Kartu GTO', labelSpan, {
-      ...DATA_CELL_BASE,
-      fontWeight: 'bold',
-      align: 'right',
-    }),
-    { value: '', type: String, ...DATA_CELL_BASE },
-    { value: '', type: String, ...DATA_CELL_BASE },
-    { value: gtoVal, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
-    { value: '', type: String, ...DATA_CELL_BASE },
-  ]);
+  // Summary Row 2: Biaya Kartu GTO (HANYA muncul jika ada biaya GTO > 0)
+  if (gtoVal > 0) {
+    const gtoDetailText = gtoItems
+      .map((g) =>
+        gtoItems.length > 1
+          ? `${g.nopol} (${formatTanggalPendek(g.tanggalMuat)}: Rp ${g.biayaKartuGto.toLocaleString('id-ID')})`
+          : `${g.nopol} · ${formatTanggalPendek(g.tanggalMuat)}`
+      )
+      .join(' | ');
+    const gtoLabel = gtoDetailText ? `Biaya Kartu GTO\n${gtoDetailText}` : 'Biaya Kartu GTO';
+    rows.push([
+      ...makeSpannedCellBlock(gtoLabel, labelSpan, {
+        ...DATA_CELL_BASE,
+        fontWeight: 'bold',
+        align: 'right',
+        wrap: true,
+        height: gtoDetailText ? 28 : undefined,
+      }),
+      { value: '', type: String, ...DATA_CELL_BASE },
+      { value: '', type: String, ...DATA_CELL_BASE },
+      { value: gtoVal, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
+      { value: '', type: String, ...DATA_CELL_BASE },
+    ]);
+  }
 
-  // Summary Row 3: Claim Susut Timbangan (if applicable)
+  // Summary Row 3: Claim Susut Timbangan (HANYA muncul jika ada ritase yang melebihi toleransi)
   if (adaClaim) {
     rows.push([
       ...makeSpannedCellBlock(
-        `Claim Susut Timbangan (${claimCount} Ritase Melebihi Toleransi 0,3%)`,
+        `Claim Susut Timbangan (${claimCount} Ritase Melebihi Toleransi)`,
         labelSpan,
         {
           ...DATA_CELL_BASE,
@@ -383,20 +407,20 @@ export async function exportNotaVendorExcel(params: ExportNotaExcelParams): Prom
     { value: '', type: String, ...HIGHLIGHT_CELL_BASE },
   ]);
 
-  // Section 2: Rincian Muatan & Claim Susut Per Ritase / Nopol
-  if (ritaseDetails.length > 0) {
+  // Section 2: Rincian Muatan & Claim Susut (HANYA muncul jika ada yang kena claim, dan HANYA berisi ritase yang susutnya melebihi toleransi)
+  if (adaClaim && claimItems.length > 0) {
     rows.push([]);
     rows.push(
       makeSpannedRow(
         {
-          value: 'RINCIAN MUATAN & PERHITUNGAN CLAIM SUSUT PER NOPOL / RITASE (TOLERANSI 0,3%)',
+          value: 'RINCIAN MUATAN & PERHITUNGAN CLAIM SUSUT (KHUSUS RITASE KENA CLAIM)',
           type: String,
           fontWeight: 'bold',
           fontSize: 11,
           align: 'left',
-          columnSpan: totalCols,
+          columnSpan: claimCols,
         },
-        totalCols
+        claimCols
       )
     );
 
@@ -414,13 +438,14 @@ export async function exportNotaVendorExcel(params: ExportNotaExcelParams): Prom
       { value: 'Bongkar (Kg)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Susut Aktual (Kg)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Susut (%)', type: String, align: 'right', ...HEADER_CELL_BASE },
-      { value: 'Toleransi 0,3% (Kg)', type: String, align: 'right', ...HEADER_CELL_BASE },
+      { value: 'Tol. (%)', type: String, align: 'right', ...HEADER_CELL_BASE },
+      { value: 'Batas Tol. (Kg)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Kena Claim (Kg)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Claim Susut (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE }
     );
     rows.push(claimHeader);
 
-    ritaseDetails.forEach((item, idx) => {
+    claimItems.forEach((item, idx) => {
       const claimRow: Row = [
         { value: idx + 1, type: Number, align: 'center', ...DATA_CELL_BASE },
         {
@@ -445,13 +470,14 @@ export async function exportNotaVendorExcel(params: ExportNotaExcelParams): Prom
         { value: item.beratBongkarKg, type: Number, format: FORMAT_KG, align: 'right', ...DATA_CELL_BASE },
         { value: item.susutAktualKg, type: Number, format: FORMAT_KG, align: 'right', ...DATA_CELL_BASE },
         { value: item.susutPersen, type: Number, format: FORMAT_PCT, align: 'right', ...DATA_CELL_BASE },
-        { value: item.toleransi03Kg, type: Number, format: FORMAT_KG_DEC, align: 'right', ...DATA_CELL_BASE },
+        { value: item.toleransiPersen, type: Number, format: FORMAT_PCT, align: 'right', ...DATA_CELL_BASE },
+        { value: item.toleransiKg, type: Number, format: FORMAT_KG_DEC, align: 'right', ...DATA_CELL_BASE },
         {
-          value: item.kenaClaim ? item.susutKenaClaimKg : 0,
+          value: item.susutKenaClaimKg,
           type: Number,
           format: FORMAT_KG_DEC,
           align: 'right',
-          fontWeight: item.kenaClaim ? 'bold' : undefined,
+          fontWeight: 'bold',
           ...DATA_CELL_BASE,
         },
         {
@@ -459,7 +485,7 @@ export async function exportNotaVendorExcel(params: ExportNotaExcelParams): Prom
           type: Number,
           format: FORMAT_RP,
           align: 'right',
-          fontWeight: item.kenaClaim ? 'bold' : undefined,
+          fontWeight: 'bold',
           ...DATA_CELL_BASE,
         }
       );
@@ -468,8 +494,8 @@ export async function exportNotaVendorExcel(params: ExportNotaExcelParams): Prom
 
     rows.push([
       ...makeSpannedCellBlock(
-        'Total Claim Susut Timbangan (Akumulasi Per Ritase)',
-        totalCols - 1,
+        'Total Claim Susut Timbangan',
+        claimCols - 1,
         { ...TOTAL_CELL_BASE, align: 'right' }
       ),
       { value: totalClaimSusutRp, type: Number, format: FORMAT_RP, align: 'right', ...TOTAL_CELL_BASE },
@@ -498,7 +524,7 @@ export async function exportDaftarRitaseExcel(
   items: Ritase[],
   vendorMap: Map<string, Vendor>
 ): Promise<string> {
-  const totalCols = 21;
+  const totalCols = 25;
   const columns: SheetOptionsColumn[] = [
     { width: 6 },
     { width: 13 },
@@ -508,14 +534,18 @@ export async function exportDaftarRitaseExcel(
     { width: 18 },
     { width: 18 },
     { width: 18 },
+    { width: 18 },
     { width: 15 },
     { width: 15 },
     { width: 14 },
     { width: 12 },
+    { width: 13 },
     { width: 17 },
     { width: 20 },
     { width: 18 },
     { width: 20 },
+    { width: 18 },
+    { width: 14 },
     { width: 18 },
     { width: 20 },
     { width: 26 },
@@ -555,15 +585,19 @@ export async function exportDaftarRitaseExcel(
       { value: 'Jenis Muatan', type: String, align: 'left', ...HEADER_CELL_BASE },
       { value: 'Lokasi Muat', type: String, align: 'left', ...HEADER_CELL_BASE },
       { value: 'Lokasi Bongkar', type: String, align: 'left', ...HEADER_CELL_BASE },
+      { value: 'Status Timbangan', type: String, align: 'center', ...HEADER_CELL_BASE },
       { value: 'Berat Muat (Kg)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Berat Bongkar (Kg)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Susut (Kg)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Susut (%)', type: String, align: 'right', ...HEADER_CELL_BASE },
+      { value: 'Tol. Susut (%)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Harga Pusat/Kg (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
-      { value: 'Tagihan Pusat (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
+      { value: 'Sisa Tagihan Pusat (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Harga Vendor/Kg (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Ongkos Vendor (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Uang Jalan (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
+      { value: 'Sumber UJ', type: String, align: 'center', ...HEADER_CELL_BASE },
+      { value: 'Kartu GTO (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Keuntungan (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Status Dokumen SJ', type: String, align: 'left', ...HEADER_CELL_BASE },
       { value: 'Status Bayar Vendor', type: String, align: 'center', ...HEADER_CELL_BASE },
@@ -577,6 +611,7 @@ export async function exportDaftarRitaseExcel(
   let totalTagihanPusat = 0;
   let totalOngkosVendor = 0;
   let totalUangJalan = 0;
+  let totalGto = 0;
   let totalKeuntungan = 0;
 
   items.forEach((r, idx) => {
@@ -587,6 +622,7 @@ export async function exportDaftarRitaseExcel(
     totalTagihanPusat += m.tagihanPusat;
     totalOngkosVendor += m.jumlahOngkosVendor;
     totalUangJalan += m.uangJalan;
+    totalGto += m.biayaKartuGto;
     totalKeuntungan += m.keuntungan;
 
     rows.push([
@@ -598,15 +634,19 @@ export async function exportDaftarRitaseExcel(
       { value: r.jenisMuatan, type: String, align: 'left', ...DATA_CELL_BASE },
       { value: r.lokasiMuat, type: String, align: 'left', ...DATA_CELL_BASE },
       { value: r.lokasiBongkar, type: String, align: 'left', ...DATA_CELL_BASE },
+      { value: m.timbanganStatus, type: String, align: 'center', ...DATA_CELL_BASE },
       { value: r.beratMuatKg || 0, type: Number, format: FORMAT_KG, align: 'right', ...DATA_CELL_BASE },
       { value: r.beratBongkarKg || 0, type: Number, format: FORMAT_KG, align: 'right', ...DATA_CELL_BASE },
       { value: m.susutKg, type: Number, format: FORMAT_KG, align: 'right', ...DATA_CELL_BASE },
       { value: m.susutPersen, type: Number, format: FORMAT_PCT, align: 'right', ...DATA_CELL_BASE },
+      { value: m.toleransiSusutPersen, type: Number, format: FORMAT_PCT, align: 'right', ...DATA_CELL_BASE },
       { value: r.hargaPusatPerKg || 0, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
       { value: m.tagihanPusat, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
       { value: r.hargaJualVendorPerKg || 0, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
       { value: m.jumlahOngkosVendor, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
       { value: m.uangJalan, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
+      { value: m.sumberUangJalan, type: String, align: 'center', ...DATA_CELL_BASE },
+      { value: m.biayaKartuGto, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
       { value: m.keuntungan, type: Number, format: FORMAT_RP, align: 'right', fontWeight: 'bold', ...DATA_CELL_BASE },
       { value: r.docStatus, type: String, align: 'left', ...DATA_CELL_BASE },
       { value: r.vendorPaymentStatus, type: String, align: 'center', ...DATA_CELL_BASE },
@@ -615,16 +655,19 @@ export async function exportDaftarRitaseExcel(
   });
 
   rows.push([
-    ...makeSpannedCellBlock('TOTAL REKAPITULASI', 8, { ...HIGHLIGHT_CELL_BASE, align: 'right' }),
+    ...makeSpannedCellBlock('TOTAL REKAPITULASI', 9, { ...HIGHLIGHT_CELL_BASE, align: 'right' }),
     { value: totalMuat, type: Number, format: FORMAT_KG, align: 'right', ...HIGHLIGHT_CELL_BASE },
     { value: totalBongkar, type: Number, format: FORMAT_KG, align: 'right', ...HIGHLIGHT_CELL_BASE },
     { value: totalSusut, type: Number, format: FORMAT_KG, align: 'right', ...HIGHLIGHT_CELL_BASE },
+    { value: '', type: String, ...HIGHLIGHT_CELL_BASE },
     { value: '', type: String, ...HIGHLIGHT_CELL_BASE },
     { value: '', type: String, ...HIGHLIGHT_CELL_BASE },
     { value: totalTagihanPusat, type: Number, format: FORMAT_RP, align: 'right', ...HIGHLIGHT_CELL_BASE },
     { value: '', type: String, ...HIGHLIGHT_CELL_BASE },
     { value: totalOngkosVendor, type: Number, format: FORMAT_RP, align: 'right', ...HIGHLIGHT_CELL_BASE },
     { value: totalUangJalan, type: Number, format: FORMAT_RP, align: 'right', ...HIGHLIGHT_CELL_BASE },
+    { value: '', type: String, ...HIGHLIGHT_CELL_BASE },
+    { value: totalGto, type: Number, format: FORMAT_RP, align: 'right', ...HIGHLIGHT_CELL_BASE },
     { value: totalKeuntungan, type: Number, format: FORMAT_RP, align: 'right', ...HIGHLIGHT_CELL_BASE },
     { value: '', type: String, ...HIGHLIGHT_CELL_BASE },
     { value: '', type: String, ...HIGHLIGHT_CELL_BASE },
@@ -656,7 +699,7 @@ export async function exportTagihanPusatExcel(params: {
   periodeLabel: string;
 }): Promise<string> {
   const { items, vendorMap, scopeLabel, periodeLabel } = params;
-  const totalCols = 15;
+  const totalCols = 17;
   const columns: SheetOptionsColumn[] = [
     { width: 6 },
     { width: 13 },
@@ -668,6 +711,8 @@ export async function exportTagihanPusatExcel(params: {
     { width: 18 },
     { width: 15 },
     { width: 17 },
+    { width: 20 },
+    { width: 18 },
     { width: 20 },
     { width: 18 },
     { width: 20 },
@@ -709,7 +754,9 @@ export async function exportTagihanPusatExcel(params: {
       { value: 'Bongkar', type: String, align: 'left', ...HEADER_CELL_BASE },
       { value: 'Tonase Bongkar (Kg)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Harga Pusat/Kg (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
-      { value: 'Tagihan Pusat (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
+      { value: 'Tagihan Bruto (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
+      { value: 'Pot. UJ Pusat (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
+      { value: 'Sisa Tagihan Pusat (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Harga Vendor/Kg (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Ongkos Vendor (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Keuntungan (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
@@ -718,6 +765,8 @@ export async function exportTagihanPusatExcel(params: {
   ];
 
   let totalTonase = 0;
+  let totalTagihanBruto = 0;
+  let totalPotUjPusat = 0;
   let totalTagihanPusat = 0;
   let totalOngkosVendor = 0;
   let totalKeuntungan = 0;
@@ -725,6 +774,8 @@ export async function exportTagihanPusatExcel(params: {
   items.forEach((r, idx) => {
     const m = computeRitaseMetrics(r);
     totalTonase += r.beratBongkarKg || 0;
+    totalTagihanBruto += m.tagihanBrutoPusat;
+    totalPotUjPusat += m.uangJalanPusat;
     totalTagihanPusat += m.tagihanPusat;
     totalOngkosVendor += m.jumlahOngkosVendor;
     totalKeuntungan += m.keuntungan;
@@ -740,6 +791,8 @@ export async function exportTagihanPusatExcel(params: {
       { value: r.lokasiBongkar, type: String, align: 'left', ...DATA_CELL_BASE },
       { value: r.beratBongkarKg || 0, type: Number, format: FORMAT_KG, align: 'right', ...DATA_CELL_BASE },
       { value: r.hargaPusatPerKg || 0, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
+      { value: m.tagihanBrutoPusat, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
+      { value: m.uangJalanPusat, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
       { value: m.tagihanPusat, type: Number, format: FORMAT_RP, align: 'right', fontWeight: 'bold', ...DATA_CELL_BASE },
       { value: r.hargaJualVendorPerKg || 0, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
       { value: m.jumlahOngkosVendor, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
@@ -749,9 +802,11 @@ export async function exportTagihanPusatExcel(params: {
   });
 
   rows.push([
-    ...makeSpannedCellBlock('TOTAL TAGIHAN KE PUSAT', 8, { ...HIGHLIGHT_CELL_BASE, align: 'right' }),
+    ...makeSpannedCellBlock('TOTAL SISA TAGIHAN KE PUSAT', 8, { ...HIGHLIGHT_CELL_BASE, align: 'right' }),
     { value: totalTonase, type: Number, format: FORMAT_KG, align: 'right', ...HIGHLIGHT_CELL_BASE },
     { value: '', type: String, ...HIGHLIGHT_CELL_BASE },
+    { value: totalTagihanBruto, type: Number, format: FORMAT_RP, align: 'right', ...HIGHLIGHT_CELL_BASE },
+    { value: totalPotUjPusat, type: Number, format: FORMAT_RP, align: 'right', ...HIGHLIGHT_CELL_BASE },
     { value: totalTagihanPusat, type: Number, format: FORMAT_RP, align: 'right', ...HIGHLIGHT_CELL_BASE },
     { value: '', type: String, ...HIGHLIGHT_CELL_BASE },
     { value: totalOngkosVendor, type: Number, format: FORMAT_RP, align: 'right', ...HIGHLIGHT_CELL_BASE },

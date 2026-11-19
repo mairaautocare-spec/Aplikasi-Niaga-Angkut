@@ -63,13 +63,6 @@ export function NotaVendorTab({
   const activeAdjKey = vendorId || 'all';
   const currentAdj: NotaAdjustment = notaAdjustments[activeAdjKey] || DEFAULT_ADJ;
 
-  const setAdjField = (field: 'biayaKartuGto', value: string) => {
-    onUpdateNotaAdjustment(activeAdjKey, {
-      ...currentAdj,
-      [field]: value,
-    });
-  };
-
   const setRitaseClaimTarif = (ritaseId: string, value: string) => {
     onUpdateNotaAdjustment(activeAdjKey, {
       ...currentAdj,
@@ -92,42 +85,64 @@ export function NotaVendorTab({
     [vendors, vendorId, isAllVendors]
   );
 
-  const filteredItems = useMemo(() => {
-    if (!vendorId) return [];
-    return ritase
-      .filter((r) => {
-        if (!isAllVendors && r.vendorId !== vendorId) return false;
-        if (dateFrom && r.tanggalMuat < dateFrom) return false;
-        if (dateTo && r.tanggalMuat > dateTo) return false;
-        if (statusFilter === 'unpaid' && r.vendorPaymentStatus !== 'Belum Lunas') return false;
-        if (statusFilter === 'paid' && r.vendorPaymentStatus !== 'Lunas') return false;
-        return true;
-      })
+  const { filteredItems, pendingBongkarCount } = useMemo(() => {
+    if (!vendorId) return { filteredItems: [], pendingBongkarCount: 0 };
+    const matched = ritase.filter((r) => {
+      if (!isAllVendors && r.vendorId !== vendorId) return false;
+      if (dateFrom && r.tanggalMuat < dateFrom) return false;
+      if (dateTo && r.tanggalMuat > dateTo) return false;
+      if (statusFilter === 'unpaid' && r.vendorPaymentStatus !== 'Belum Lunas') return false;
+      if (statusFilter === 'paid' && r.vendorPaymentStatus !== 'Lunas') return false;
+      return true;
+    });
+
+    const ready = matched
+      .filter((r) => computeRitaseMetrics(r).isSelesaiBongkar)
       .sort((a, b) => a.tanggalMuat.localeCompare(b.tanggalMuat));
+
+    return {
+      filteredItems: ready,
+      pendingBongkarCount: matched.length - ready.length,
+    };
   }, [ritase, vendorId, isAllVendors, dateFrom, dateTo, statusFilter]);
 
   const totals = useMemo(() => {
     let totalTonase = 0;
     let totalJumlahOngkos = 0;
     let totalUangJalan = 0;
+    let totalGto = 0;
     let unpaidCount = 0;
+    const gtoItems: { r: Ritase; biayaKartuGto: number }[] = [];
 
     const ritaseDetails = filteredItems.map((r) => {
       const m = computeRitaseMetrics(r);
       totalTonase += r.beratBongkarKg || 0;
       totalJumlahOngkos += m.jumlahOngkosVendor;
       totalUangJalan += m.uangJalan;
+      totalGto += m.biayaKartuGto;
+      if (m.biayaKartuGto > 0) {
+        gtoItems.push({ r, biayaKartuGto: m.biayaKartuGto });
+      }
       if (r.vendorPaymentStatus === 'Belum Lunas') {
         unpaidCount += 1;
       }
 
       const beratMuatKg = r.beratMuatKg || 0;
       const beratBongkarKg = r.beratBongkarKg || 0;
-      const susutAktualKg = Math.max(0, beratMuatKg - beratBongkarKg);
-      const susutPersen = beratMuatKg > 0 ? (susutAktualKg / beratMuatKg) * 100 : 0;
-      // Toleransi susut 0,3% dihitung per ritase / nopol masing-masing
-      const toleransi03Kg = beratMuatKg * 0.003;
-      const susutKenaClaimKg = Math.max(0, susutAktualKg - toleransi03Kg);
+      const susutAktualKg =
+        beratMuatKg > 0 && beratBongkarKg > 0
+          ? Math.max(0, beratMuatKg - beratBongkarKg)
+          : 0;
+      const susutPersen =
+        beratMuatKg > 0 && beratBongkarKg > 0
+          ? (susutAktualKg / beratMuatKg) * 100
+          : 0;
+
+      // Toleransi susut sesuai persentase masing-masing ritase (default 0,3%)
+      const toleransiPersen = m.toleransiSusutPersen;
+      const toleransiKg = beratMuatKg > 0 ? beratMuatKg * (toleransiPersen / 100) : 0;
+      const susutKenaClaimKg =
+        beratMuatKg > 0 ? Math.max(0, susutAktualKg - toleransiKg) : 0;
       const kenaClaim = susutKenaClaimKg > 0;
 
       const tarifStr =
@@ -141,7 +156,8 @@ export function NotaVendorTab({
         beratBongkarKg,
         susutAktualKg,
         susutPersen,
-        toleransi03Kg,
+        toleransiPersen,
+        toleransiKg,
         susutKenaClaimKg,
         kenaClaim,
         tarifStr,
@@ -155,7 +171,7 @@ export function NotaVendorTab({
     const totalSusutKenaClaimKg = claimItems.reduce((sum, d) => sum + d.susutKenaClaimKg, 0);
     const totalClaimSusutRp = claimItems.reduce((sum, d) => sum + d.claimSusutRp, 0);
 
-    const gtoVal = Math.max(0, Number(currentAdj.biayaKartuGto) || 0);
+    const gtoVal = totalGto;
     const kekuranganPembayaran = totalJumlahOngkos - gtoVal - totalClaimSusutRp - totalUangJalan;
 
     return {
@@ -168,6 +184,7 @@ export function NotaVendorTab({
       totalJumlahOngkos,
       totalUangJalan,
       gtoVal,
+      gtoItems,
       kekuranganPembayaran,
       unpaidCount,
     };
@@ -178,6 +195,9 @@ export function NotaVendorTab({
       minimumFractionDigits: val % 1 === 0 ? 0 : 2,
       maximumFractionDigits: 2,
     });
+
+  const formatPersenLabel = (val: number) =>
+    String(Number(val.toFixed(2))).replace('.', ',');
 
   const handleCopyWhatsApp = async () => {
     const vendorLabel = isAllVendors
@@ -212,13 +232,16 @@ export function NotaVendorTab({
     filteredItems.forEach((r, idx) => {
       const m = computeRitaseMetrics(r);
       const vPrefix = isAllVendors ? `[${vendorMap.get(r.vendorId)?.name || 'Vendor'}] ` : '';
+      const extras: string[] = [];
+      if (m.uangJalan > 0) extras.push(`DP: ${formatRp(m.uangJalan)}`);
+      if (m.biayaKartuGto > 0) extras.push(`GTO: ${formatRp(m.biayaKartuGto)}`);
       lines.push(
         `${idx + 1}. ${vPrefix}${formatTanggalPendek(r.tanggalMuat)} | ${r.nopol} (${r.namaSopir}) | ${
           r.jenisMuatan
         } | ${r.lokasiMuat} -> ${r.lokasiBongkar} | ${formatRibuan(
           r.beratBongkarKg
         )} Kg x ${formatRp(r.hargaJualVendorPerKg)} = ${formatRp(m.jumlahOngkosVendor)}${
-          m.uangJalan > 0 ? ` (DP: ${formatRp(m.uangJalan)})` : ''
+          extras.length > 0 ? ` (${extras.join(', ')})` : ''
         }`
       );
     });
@@ -227,31 +250,45 @@ export function NotaVendorTab({
     lines.push(`Total Tonase: ${formatRibuan(totals.totalTonase)} Kg`);
     lines.push(`Total Ongkos Angkutan: ${formatRp(totals.totalJumlahOngkos)}`);
     if (totals.gtoVal > 0) {
-      lines.push(`Biaya Reistrasi Kartu GTO: -${formatRp(totals.gtoVal)}`);
+      const gtoDetailText = totals.gtoItems
+        .map((g) =>
+          totals.gtoItems.length > 1
+            ? `${g.r.nopol} (${formatTanggalPendek(g.r.tanggalMuat)}: ${formatRp(g.biayaKartuGto)})`
+            : `${g.r.nopol} · ${formatTanggalPendek(g.r.tanggalMuat)}`
+        )
+        .join(' | ');
+      lines.push(`Biaya Kartu GTO (${gtoDetailText}): -${formatRp(totals.gtoVal)}`);
     }
     if (totals.adaClaim) {
-      lines.push(`Total Claim Susut Timbangan (${totals.claimItems.length} Ritase): -${formatRp(totals.totalClaimSusutRp)}`);
+      lines.push(
+        `Total Claim Susut Timbangan (${totals.claimItems.length} Ritase): -${formatRp(
+          totals.totalClaimSusutRp
+        )}`
+      );
     }
     lines.push(`DP / Uang Jalan: -${formatRp(totals.totalUangJalan)}`);
     lines.push(`*Kekurangan Pembayaran (Total Transfer): ${formatRp(totals.kekuranganPembayaran)}*`);
-    lines.push('');
-    lines.push('*Rincian Muatan & Claim Susut Per Ritase / Nopol (Toleransi 0,3%):*');
-    totals.ritaseDetails.forEach((item, idx) => {
-      const claimStatusText = item.kenaClaim
-        ? `Kena Claim ${formatKgDesimal(item.susutKenaClaimKg)} Kg x ${formatRp(
+
+    if (totals.adaClaim) {
+      lines.push('');
+      lines.push('*Rincian Claim Susut (Khusus Ritase Melebihi Toleransi):*');
+      totals.claimItems.forEach((item, idx) => {
+        lines.push(
+          `${idx + 1}. ${formatTanggalPendek(item.r.tanggalMuat)} | ${item.r.nopol} | ${
+            item.r.jenisMuatan
+          } | Muat ${formatRibuan(item.beratMuatKg)} Kg -> Bongkar ${formatRibuan(
+            item.beratBongkarKg
+          )} Kg | Susut ${formatRibuan(item.susutAktualKg)} Kg (${item.susutPersen.toFixed(
+            2
+          )}%) | Tol ${formatPersenLabel(item.toleransiPersen)}%: ${formatKgDesimal(
+            item.toleransiKg
+          )} Kg | Kena Claim ${formatKgDesimal(item.susutKenaClaimKg)} Kg x ${formatRp(
             item.hargaClaimPerKg
           )} = ${formatRp(item.claimSusutRp)}`
-        : 'Dalam toleransi <= 0,3% (Rp 0)';
-      lines.push(
-        `${idx + 1}. ${formatTanggalPendek(item.r.tanggalMuat)} | ${item.r.nopol} | ${
-          item.r.jenisMuatan
-        } | Muat ${formatRibuan(item.beratMuatKg)} Kg -> Bongkar ${formatRibuan(
-          item.beratBongkarKg
-        )} Kg | Susut ${formatRibuan(item.susutAktualKg)} Kg (${item.susutPersen.toFixed(
-          2
-        )}%) | Tol 0,3%: ${formatKgDesimal(item.toleransi03Kg)} Kg | ${claimStatusText}`
-      );
-    });
+        );
+      });
+    }
+
     lines.push('');
     lines.push(`*Pembayaran:* ${paymentLabel}`);
 
@@ -307,11 +344,16 @@ export function NotaVendorTab({
         isAllVendors,
         vendorMap,
         items: filteredItems,
-        ritaseDetails: totals.ritaseDetails,
+        claimItems: totals.claimItems,
         totalTonase: totals.totalTonase,
         totalJumlahOngkos: totals.totalJumlahOngkos,
         totalUangJalan: totals.totalUangJalan,
         gtoVal: totals.gtoVal,
+        gtoItems: totals.gtoItems.map((g) => ({
+          nopol: g.r.nopol,
+          tanggalMuat: g.r.tanggalMuat,
+          biayaKartuGto: g.biayaKartuGto,
+        })),
         adaClaim: totals.adaClaim,
         claimCount: totals.claimItems.length,
         totalClaimSusutRp: totals.totalClaimSusutRp,
@@ -336,7 +378,7 @@ export function NotaVendorTab({
             Cetak Rincian Pembayaran Vendor
           </h1>
           <p className="mt-1 text-sm text-slate-400">
-            Toleransi susut adalah 0,3% dari total muatan awal. Kolom Claim Susut hanya muncul otomatis jika susut melebihi batas toleransi.
+            Biaya Kartu GTO &amp; Claim Susut otomatis mengikuti data per ritase — barisnya hanya muncul di nota jika ada tagihan GTO atau susut melewati batas toleransi.
           </p>
         </div>
 
@@ -435,27 +477,50 @@ export function NotaVendorTab({
                 onClick={() => onUpdateNotaAdjustment(activeAdjKey, DEFAULT_ADJ)}
                 className="text-[11px] font-medium text-slate-400 hover:text-slate-200"
               >
-                Reset Potongan
+                Reset Harga Claim
               </button>
             </div>
 
             <div className="mt-4 space-y-4">
-              <div>
-                <label htmlFor="nota-gto" className="block text-xs font-semibold text-slate-300">
-                  Biaya Reistrasi Kartu GTO (Rp)
-                </label>
-                <input
-                  id="nota-gto"
-                  type="number"
-                  min={0}
-                  step="1000"
-                  value={currentAdj.biayaKartuGto}
-                  onChange={(e) => setAdjField('biayaKartuGto', e.target.value)}
-                  className="mt-1.5 w-full min-h-[40px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                />
+              {/* Ringkasan Kartu GTO otomatis dari masing-masing ritase */}
+              <div
+                className={`rounded-lg border p-3.5 text-xs ${
+                  totals.gtoVal > 0
+                    ? 'border-blue-800/70 bg-blue-950/25'
+                    : 'border-slate-800 bg-slate-950/60'
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-semibold text-slate-200">
+                    Biaya Kartu GTO (Dari Data Ritase)
+                  </span>
+                  <span
+                    className={`font-mono font-bold tabular-nums ${
+                      totals.gtoVal > 0 ? 'text-blue-300' : 'text-slate-400'
+                    }`}
+                  >
+                    {totals.gtoVal > 0 ? formatRp(totals.gtoVal) : 'Tidak Ada'}
+                  </span>
+                </div>
+                {totals.gtoVal > 0 ? (
+                  <div className="mt-2 space-y-1 border-t border-blue-800/40 pt-2 text-[11px] text-slate-300">
+                    {totals.gtoItems.map((g) => (
+                      <div key={`gto-${g.r.id}`} className="flex justify-between gap-2 font-mono">
+                        <span>
+                          {formatTanggalPendek(g.r.tanggalMuat)} · {g.r.nopol}
+                        </span>
+                        <span className="text-blue-200">{formatRp(g.biayaKartuGto)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Tidak ada ritase yang memakai Kartu GTO. Baris GTO otomatis disembunyikan dari Nota.
+                  </p>
+                )}
               </div>
 
-              {/* Status Toleransi Susut 0,3% Per Ritase / Nopol */}
+              {/* Status Toleransi Susut Per Ritase / Nopol */}
               <div
                 className={`rounded-lg border p-3.5 space-y-3 ${
                   totals.adaClaim
@@ -465,7 +530,7 @@ export function NotaVendorTab({
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                   <span className="font-semibold text-slate-200">
-                    Pengecekan Susut Per Nopol / Ritase (Toleransi 0,3%)
+                    Pengecekan Susut Per Nopol / Ritase (Sesuai Toleransi Ritase)
                   </span>
                   <span
                     className={`font-mono font-semibold ${
@@ -504,8 +569,8 @@ export function NotaVendorTab({
                             </span>
                           </div>
                           <div>
-                            Tol 0,3%:{' '}
-                            <span className="text-slate-200">{formatKgDesimal(item.toleransi03Kg)} Kg</span>
+                            Tol {formatPersenLabel(item.toleransiPersen)}%:{' '}
+                            <span className="text-slate-200">{formatKgDesimal(item.toleransiKg)} Kg</span>
                           </div>
                         </div>
 
@@ -527,7 +592,7 @@ export function NotaVendorTab({
                             className="mt-1 w-full min-h-[38px] rounded-lg border border-amber-600/60 bg-slate-950 px-3 py-1.5 font-mono text-sm text-slate-100 tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
                           />
                           <p className="mt-1 text-[11px] text-slate-400 font-mono tabular-nums">
-                            ({formatRibuan(item.susutAktualKg)} − {formatKgDesimal(item.toleransi03Kg)}) Kg ={' '}
+                            ({formatRibuan(item.susutAktualKg)} − {formatKgDesimal(item.toleransiKg)}) Kg ={' '}
                             {formatKgDesimal(item.susutKenaClaimKg)} Kg × {formatRp(item.hargaClaimPerKg)} ={' '}
                             {formatRp(item.claimSusutRp)}
                           </p>
@@ -537,13 +602,21 @@ export function NotaVendorTab({
                   </div>
                 ) : (
                   <div className="border-t border-emerald-800/40 pt-2.5 text-xs font-medium text-emerald-300">
-                    Semua ritase memiliki susut ≤ 0,3% pada masing-masing muatan. Tidak ada claim susut (kolom harga &amp; baris Claim Susut tidak ditampilkan di nota).
+                    Semua ritase berada dalam batas toleransi susut masing-masing. Tidak ada claim susut (baris &amp; rincian susut tidak ditampilkan di nota).
                   </div>
                 )}
               </div>
             </div>
           </div>
         </div>
+
+        {/* Info ritase dalam perjalanan (belum timbang bongkar) */}
+        {pendingBongkarCount > 0 && (
+          <div className="rounded-xl border border-amber-700/60 bg-amber-950/35 px-4 py-3 text-xs text-amber-200">
+            Ada <strong className="text-amber-100">{pendingBongkarCount} ritase</strong> sesuai filter ini yang{' '}
+            <strong className="text-amber-100">belum diisi Berat Bongkar</strong> (masih di jalan), sehingga belum dimasukkan ke rincian nota agar tagihan tidak salah hitung.
+          </div>
+        )}
 
         {/* Action Buttons Bar */}
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900 px-5 py-4">
@@ -727,20 +800,33 @@ export function NotaVendorTab({
                 </td>
               </tr>
 
-              {/* Baris Total 2: Biaya Reistrasi Kartu GTO */}
-              <tr>
-                <td colSpan={colSpanCount} className="border border-slate-900 px-2.5 py-1.5 text-right font-bold">
-                  Biaya Reistrasi Kartu GTO
-                </td>
-                <td className="border border-slate-900 px-2 py-1.5"></td>
-                <td className="border border-slate-900 px-2 py-1.5"></td>
-                <td className="border border-slate-900 px-2 py-1.5 text-right font-mono tabular-nums whitespace-nowrap">
-                  {formatRp(totals.gtoVal)}
-                </td>
-                <td className="border border-slate-900 px-2 py-1.5"></td>
-              </tr>
+              {/* Baris Total 2: Biaya Kartu GTO (HANYA muncul jika total GTO > 0) */}
+              {totals.gtoVal > 0 && (
+                <tr>
+                  <td colSpan={colSpanCount} className="border border-slate-900 px-2.5 py-1.5 text-right">
+                    <div className="font-bold">Biaya Kartu GTO</div>
+                    <div className="mt-0.5 font-mono text-[11px] font-normal text-slate-700">
+                      {totals.gtoItems
+                        .map((g) =>
+                          totals.gtoItems.length > 1
+                            ? `${g.r.nopol} (${formatTanggalPendek(g.r.tanggalMuat)}: ${formatRp(
+                                g.biayaKartuGto
+                              )})`
+                            : `${g.r.nopol} · ${formatTanggalPendek(g.r.tanggalMuat)}`
+                        )
+                        .join(' | ')}
+                    </div>
+                  </td>
+                  <td className="border border-slate-900 px-2 py-1.5"></td>
+                  <td className="border border-slate-900 px-2 py-1.5"></td>
+                  <td className="border border-slate-900 px-2 py-1.5 text-right font-mono tabular-nums whitespace-nowrap align-middle">
+                    {formatRp(totals.gtoVal)}
+                  </td>
+                  <td className="border border-slate-900 px-2 py-1.5"></td>
+                </tr>
+              )}
 
-              {/* Baris Total 3: Claim Susut Timbangan (HANYA muncul jika ada ritase yang susutnya > toleransi 0,3%) */}
+              {/* Baris Total 3: Claim Susut Timbangan (HANYA muncul jika ada ritase yang susutnya > toleransi) */}
               {totals.adaClaim && (
                 <tr>
                   <td colSpan={colSpanCount} className="border border-slate-900 px-2.5 py-1.5 text-right font-bold">
@@ -748,7 +834,7 @@ export function NotaVendorTab({
                       ? `Claim Susut Timbangan (${totals.claimItems[0].r.nopol} · ${formatKgDesimal(
                           totals.claimItems[0].susutKenaClaimKg
                         )} Kg × ${formatRp(totals.claimItems[0].hargaClaimPerKg)})`
-                      : `Total Claim Susut Timbangan (${totals.claimItems.length} Ritase Melebihi 0,3%)`}
+                      : `Total Claim Susut Timbangan (${totals.claimItems.length} Ritase Melebihi Toleransi)`}
                   </td>
                   <td className="border border-slate-900 px-2 py-1.5"></td>
                   <td className="border border-slate-900 px-2 py-1.5"></td>
@@ -788,11 +874,11 @@ export function NotaVendorTab({
           </table>
         </div>
 
-        {/* Rincian Nopol, Tanggal, Muatan & Perhitungan Claim Susut Per Ritase / Nopol di bawah tabel sisa pembayaran */}
-        {filteredItems.length > 0 && (
+        {/* Rincian Claim Susut (HANYA muncul jika ada ritase kena claim, dan HANYA memuat ritase yang susut melebihi toleransi) */}
+        {totals.adaClaim && (
           <div className="mt-5 border-t border-slate-400 pt-4 text-xs text-black space-y-3">
             <div className="font-bold uppercase tracking-wide text-black">
-              Rincian Muatan &amp; Perhitungan Claim Susut Per Nopol / Ritase (Toleransi 0,3%)
+              Rincian Muatan &amp; Perhitungan Claim Susut (Khusus Ritase Melebihi Toleransi)
             </div>
 
             <div className="overflow-x-auto">
@@ -817,7 +903,7 @@ export function NotaVendorTab({
                       Susut (Kg / %)
                     </th>
                     <th className="border border-slate-900 px-2 py-1.5 text-right whitespace-nowrap">
-                      Toleransi 0,3% (Kg)
+                      Batas Toleransi
                     </th>
                     <th className="border border-slate-900 px-2 py-1.5 text-right whitespace-nowrap">
                       Kena Claim (Kg)
@@ -828,7 +914,7 @@ export function NotaVendorTab({
                   </tr>
                 </thead>
                 <tbody>
-                  {totals.ritaseDetails.map((item, idx) => (
+                  {totals.claimItems.map((item, idx) => (
                     <tr key={`susut-${item.r.id}`}>
                       <td className="border border-slate-900 px-2 py-1 text-center font-mono tabular-nums">
                         {idx + 1}
@@ -847,35 +933,23 @@ export function NotaVendorTab({
                         {formatRibuan(item.beratBongkarKg)}
                       </td>
                       <td className="border border-slate-900 px-2 py-1 text-right font-mono tabular-nums whitespace-nowrap">
-                        {item.susutAktualKg > 0
-                          ? `${formatRibuan(item.susutAktualKg)} Kg (${item.susutPersen.toFixed(2)}%)`
-                          : '0 Kg (0,00%)'}
+                        {formatRibuan(item.susutAktualKg)} Kg ({item.susutPersen.toFixed(2)}%)
                       </td>
                       <td className="border border-slate-900 px-2 py-1 text-right font-mono tabular-nums whitespace-nowrap">
-                        {formatKgDesimal(item.toleransi03Kg)} Kg
+                        {formatKgDesimal(item.toleransiKg)} Kg ({formatPersenLabel(item.toleransiPersen)}%)
+                      </td>
+                      <td className="border border-slate-900 px-2 py-1 text-right font-mono font-bold tabular-nums whitespace-nowrap">
+                        {formatKgDesimal(item.susutKenaClaimKg)} Kg
                       </td>
                       <td className="border border-slate-900 px-2 py-1 text-right font-mono tabular-nums whitespace-nowrap">
-                        {item.kenaClaim ? (
-                          <span className="font-bold">{formatKgDesimal(item.susutKenaClaimKg)} Kg</span>
-                        ) : (
-                          <span>- (Aman)</span>
-                        )}
-                      </td>
-                      <td className="border border-slate-900 px-2 py-1 text-right font-mono tabular-nums whitespace-nowrap">
-                        {item.kenaClaim ? (
-                          <span>
-                            {formatKgDesimal(item.susutKenaClaimKg)} × {formatRp(item.hargaClaimPerKg)} ={' '}
-                            <strong>{formatRp(item.claimSusutRp)}</strong>
-                          </span>
-                        ) : (
-                          <span>Rp 0 (≤ 0,3%)</span>
-                        )}
+                        {formatKgDesimal(item.susutKenaClaimKg)} × {formatRp(item.hargaClaimPerKg)} ={' '}
+                        <strong>{formatRp(item.claimSusutRp)}</strong>
                       </td>
                     </tr>
                   ))}
                   <tr className="font-bold bg-slate-100">
                     <td colSpan={9} className="border border-slate-900 px-2 py-1.5 text-right">
-                      Total Claim Susut Timbangan (Akumulasi Per Ritase)
+                      Total Claim Susut Timbangan
                     </td>
                     <td className="border border-slate-900 px-2 py-1.5 text-right font-mono tabular-nums whitespace-nowrap">
                       {formatRp(totals.totalClaimSusutRp)}
@@ -886,28 +960,19 @@ export function NotaVendorTab({
             </div>
 
             <div className="rounded border border-slate-900 px-3.5 py-2.5 text-xs text-black space-y-1">
-              {totals.adaClaim ? (
-                <>
-                  <div className="font-bold">Ringkasan Ritase Kena Claim Susut (&gt; 0,3%):</div>
-                  {totals.claimItems.map((item) => (
-                    <div key={`summary-claim-${item.r.id}`} className="flex flex-wrap justify-between gap-2">
-                      <span>
-                        {formatTanggalPendek(item.r.tanggalMuat)} · {item.r.nopol} ({item.r.jenisMuatan}):{' '}
-                        ({formatKgDesimal(item.susutAktualKg)} − {formatKgDesimal(item.toleransi03Kg)}) Kg ={' '}
-                        {formatKgDesimal(item.susutKenaClaimKg)} Kg × {formatRp(item.hargaClaimPerKg)}/Kg
-                      </span>
-                      <span className="font-mono font-bold tabular-nums">
-                        {formatRp(item.claimSusutRp)}
-                      </span>
-                    </div>
-                  ))}
-                </>
-              ) : (
-                <div className="flex flex-wrap justify-between gap-2 font-semibold">
-                  <span>Status Claim Susut</span>
-                  <span>Semua nopol / ritase dalam batas toleransi ≤ 0,3% (Rp 0)</span>
+              <div className="font-bold">Ringkasan Ritase Kena Claim Susut:</div>
+              {totals.claimItems.map((item) => (
+                <div key={`summary-claim-${item.r.id}`} className="flex flex-wrap justify-between gap-2">
+                  <span>
+                    {formatTanggalPendek(item.r.tanggalMuat)} · {item.r.nopol} ({item.r.jenisMuatan}):{' '}
+                    ({formatKgDesimal(item.susutAktualKg)} − {formatKgDesimal(item.toleransiKg)}) Kg ={' '}
+                    {formatKgDesimal(item.susutKenaClaimKg)} Kg × {formatRp(item.hargaClaimPerKg)}/Kg
+                  </span>
+                  <span className="font-mono font-bold tabular-nums">
+                    {formatRp(item.claimSusutRp)}
+                  </span>
                 </div>
-              )}
+              ))}
 
               <div className="flex flex-wrap justify-between gap-2 border-t border-slate-400 pt-1.5 font-bold">
                 <span>Total Sisa Pembayaran (Transfer)</span>

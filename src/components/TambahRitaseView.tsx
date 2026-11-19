@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ArrowLeft, Plus, Save } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Plus, Save, Sparkles } from 'lucide-react';
 import {
   DocStatus,
   PusatPaymentStatus,
   Ritase,
+  SumberUangJalan,
   Vendor,
   VendorPaymentStatus,
 } from '../types/transport';
@@ -49,9 +50,19 @@ interface RitaseFormState {
   hargaPusatPerKg: string;
   hargaJualVendorPerKg: string;
   uangJalan: string;
+  sumberUangJalan: SumberUangJalan;
+  biayaKartuGto: string;
+  toleransiSusutPersen: string;
   docStatus: DocStatus;
   vendorPaymentStatus: VendorPaymentStatus;
   pusatPaymentStatus: PusatPaymentStatus;
+}
+
+function parseToleransiValue(raw: unknown): number {
+  if (raw !== undefined && raw !== null && String(raw).trim() !== '' && !Number.isNaN(Number(raw))) {
+    return Math.max(0, Number(raw));
+  }
+  return 0.3;
 }
 
 function createInitialFormState(defaultVendorId: string): RitaseFormState {
@@ -68,6 +79,9 @@ function createInitialFormState(defaultVendorId: string): RitaseFormState {
     hargaPusatPerKg: '',
     hargaJualVendorPerKg: '',
     uangJalan: '0',
+    sumberUangJalan: 'Broker',
+    biayaKartuGto: '',
+    toleransiSusutPersen: '0.3',
     docStatus: 'SJ & Tiket Timbang Belum Balik',
     vendorPaymentStatus: 'Belum Lunas',
     pusatPaymentStatus: 'Belum Dibayar Pusat',
@@ -99,11 +113,17 @@ export function TambahRitaseView({
         jenisMuatan: editingRitase.jenisMuatan,
         lokasiMuat: editingRitase.lokasiMuat,
         lokasiBongkar: editingRitase.lokasiBongkar,
-        beratMuatKg: String(editingRitase.beratMuatKg),
-        beratBongkarKg: String(editingRitase.beratBongkarKg),
+        beratMuatKg: editingRitase.beratMuatKg > 0 ? String(editingRitase.beratMuatKg) : '',
+        beratBongkarKg:
+          editingRitase.beratBongkarKg > 0 ? String(editingRitase.beratBongkarKg) : '',
         hargaPusatPerKg: String(editingRitase.hargaPusatPerKg),
         hargaJualVendorPerKg: String(editingRitase.hargaJualVendorPerKg),
         uangJalan: String(editingRitase.uangJalan),
+        sumberUangJalan:
+          editingRitase.sumberUangJalan === 'Pusat' ? 'Pusat' : 'Broker',
+        biayaKartuGto:
+          (editingRitase.biayaKartuGto || 0) > 0 ? String(editingRitase.biayaKartuGto) : '',
+        toleransiSusutPersen: String(parseToleransiValue(editingRitase.toleransiSusutPersen)),
         docStatus: editingRitase.docStatus,
         vendorPaymentStatus: editingRitase.vendorPaymentStatus,
         pusatPaymentStatus: editingRitase.pusatPaymentStatus,
@@ -143,13 +163,82 @@ export function TambahRitaseView({
       if (n && s && !nopolDriverMap.has(n)) nopolDriverMap.set(n, s);
     }
 
+    const lokasiMuatSet = new Set<string>();
+    const lokasiBongkarSet = new Set<string>();
+    for (const r of ritase) {
+      if (r.lokasiMuat.trim()) lokasiMuatSet.add(r.lokasiMuat.trim());
+      if (r.lokasiBongkar.trim()) lokasiBongkarSet.add(r.lokasiBongkar.trim());
+    }
+
     return {
       pairs: Array.from(pairMap.values()).slice(0, 6),
       nopolDriverMap,
       nopols: Array.from(nopolSet),
       drivers: Array.from(driverSet),
+      lokasiMuats: Array.from(lokasiMuatSet),
+      lokasiBongkars: Array.from(lokasiBongkarSet),
     };
   }, [ritase, form.vendorId]);
+
+  // Poin 3.5: Saran Tarif Harga Terakhir berdasarkan Rute & Vendor
+  const suggestedRate = useMemo(() => {
+    const muatQ = form.lokasiMuat.trim().toLowerCase();
+    const bongkarQ = form.lokasiBongkar.trim().toLowerCase();
+    const candidates = ritase
+      .filter(
+        (r) =>
+          r.id !== editingRitase?.id &&
+          (r.hargaPusatPerKg > 0 || r.hargaJualVendorPerKg > 0)
+      )
+      .sort((a, b) => b.tanggalMuat.localeCompare(a.tanggalMuat));
+
+    if (candidates.length === 0) return null;
+
+    if (muatQ && bongkarQ) {
+      const exactVendorRoute = candidates.find(
+        (r) =>
+          r.vendorId === form.vendorId &&
+          r.lokasiMuat.trim().toLowerCase() === muatQ &&
+          r.lokasiBongkar.trim().toLowerCase() === bongkarQ
+      );
+      if (exactVendorRoute) {
+        return {
+          hargaPusat: exactVendorRoute.hargaPusatPerKg,
+          hargaVendor: exactVendorRoute.hargaJualVendorPerKg,
+          toleransiSusutPersen: parseToleransiValue(exactVendorRoute.toleransiSusutPersen),
+          label: `Rute & vendor sama (${exactVendorRoute.lokasiMuat} → ${exactVendorRoute.lokasiBongkar})`,
+        };
+      }
+
+      const exactRoute = candidates.find(
+        (r) =>
+          r.lokasiMuat.trim().toLowerCase() === muatQ &&
+          r.lokasiBongkar.trim().toLowerCase() === bongkarQ
+      );
+      if (exactRoute) {
+        return {
+          hargaPusat: exactRoute.hargaPusatPerKg,
+          hargaVendor: exactRoute.hargaJualVendorPerKg,
+          toleransiSusutPersen: parseToleransiValue(exactRoute.toleransiSusutPersen),
+          label: `Rute sama (${exactRoute.lokasiMuat} → ${exactRoute.lokasiBongkar})`,
+        };
+      }
+    }
+
+    if (form.vendorId) {
+      const vendorLatest = candidates.find((r) => r.vendorId === form.vendorId);
+      if (vendorLatest) {
+        return {
+          hargaPusat: vendorLatest.hargaPusatPerKg,
+          hargaVendor: vendorLatest.hargaJualVendorPerKg,
+          toleransiSusutPersen: parseToleransiValue(vendorLatest.toleransiSusutPersen),
+          label: `Tarif terakhir vendor (${vendorLatest.lokasiMuat} → ${vendorLatest.lokasiBongkar})`,
+        };
+      }
+    }
+
+    return null;
+  }, [ritase, editingRitase?.id, form.vendorId, form.lokasiMuat, form.lokasiBongkar]);
 
   const liveMetrics = useMemo(() => {
     const dummyRitase: Ritase = {
@@ -166,6 +255,9 @@ export function TambahRitaseView({
       hargaPusatPerKg: Number(form.hargaPusatPerKg) || 0,
       hargaJualVendorPerKg: Number(form.hargaJualVendorPerKg) || 0,
       uangJalan: Number(form.uangJalan) || 0,
+      sumberUangJalan: form.sumberUangJalan,
+      biayaKartuGto: Math.max(0, Number(form.biayaKartuGto) || 0),
+      toleransiSusutPersen: parseToleransiValue(form.toleransiSusutPersen),
       docStatus: form.docStatus,
       vendorPaymentStatus: form.vendorPaymentStatus,
       pusatPaymentStatus: form.pusatPaymentStatus,
@@ -231,6 +323,9 @@ export function TambahRitaseView({
       hargaPusatPerKg: Math.max(0, Number(form.hargaPusatPerKg) || 0),
       hargaJualVendorPerKg: Math.max(0, Number(form.hargaJualVendorPerKg) || 0),
       uangJalan: Math.max(0, Number(form.uangJalan) || 0),
+      sumberUangJalan: form.sumberUangJalan,
+      biayaKartuGto: Math.max(0, Number(form.biayaKartuGto) || 0),
+      toleransiSusutPersen: parseToleransiValue(form.toleransiSusutPersen),
       docStatus: form.docStatus,
       vendorPaymentStatus: form.vendorPaymentStatus,
       pusatPaymentStatus: form.pusatPaymentStatus,
@@ -430,12 +525,18 @@ export function TambahRitaseView({
             <input
               id="rit-muat"
               type="text"
+              list="lokasi-muat-history"
               required
               value={form.lokasiMuat}
               onChange={(e) => setForm((p) => ({ ...p, lokasiMuat: e.target.value }))}
               placeholder="Pelabuhan / Gudang Asal"
               className="mt-1.5 w-full min-h-[42px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             />
+            <datalist id="lokasi-muat-history">
+              {vendorFleetSuggestions.lokasiMuats.map((loc) => (
+                <option key={loc} value={loc} />
+              ))}
+            </datalist>
           </div>
 
           <div>
@@ -445,46 +546,50 @@ export function TambahRitaseView({
             <input
               id="rit-bongkar"
               type="text"
+              list="lokasi-bongkar-history"
               required
               value={form.lokasiBongkar}
               onChange={(e) => setForm((p) => ({ ...p, lokasiBongkar: e.target.value }))}
               placeholder="Pabrik / Gudang Tujuan"
               className="mt-1.5 w-full min-h-[42px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             />
+            <datalist id="lokasi-bongkar-history">
+              {vendorFleetSuggestions.lokasiBongkars.map((loc) => (
+                <option key={loc} value={loc} />
+              ))}
+            </datalist>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label htmlFor="rit-bmuat" className="block text-xs font-semibold text-slate-300">
-                Berat Muat (Kg) <span className="text-rose-400">*</span>
+                Berat Muat (Kg) <span className="text-[11px] font-normal text-slate-400">(Opsional)</span>
               </label>
               <input
                 id="rit-bmuat"
                 type="number"
                 min={0}
                 step="1"
-                required
                 value={form.beratMuatKg}
                 onChange={(e) => setForm((p) => ({ ...p, beratMuatKg: e.target.value }))}
-                placeholder="24500"
-                className="mt-1.5 w-full min-h-[42px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                placeholder="Isi setelah muat"
+                className="mt-1.5 w-full min-h-[42px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 tabular-nums placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
               />
             </div>
 
             <div>
               <label htmlFor="rit-bbongkar" className="block text-xs font-semibold text-slate-300">
-                Berat Bongkar (Kg) <span className="text-rose-400">*</span>
+                Berat Bongkar (Kg) <span className="text-[11px] font-normal text-slate-400">(Opsional)</span>
               </label>
               <input
                 id="rit-bbongkar"
                 type="number"
                 min={0}
                 step="1"
-                required
                 value={form.beratBongkarKg}
                 onChange={(e) => setForm((p) => ({ ...p, beratBongkarKg: e.target.value }))}
-                placeholder="24430"
-                className="mt-1.5 w-full min-h-[42px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                placeholder="Isi setelah bongkar"
+                className="mt-1.5 w-full min-h-[42px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 tabular-nums placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
               />
             </div>
           </div>
@@ -541,6 +646,36 @@ export function TambahRitaseView({
             </div>
           </div>
 
+          {suggestedRate && (
+            <div className="sm:col-span-2 lg:col-span-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-800/60 bg-blue-950/30 px-3.5 py-2.5 text-xs">
+              <div className="flex items-center gap-2 text-blue-200">
+                <Sparkles className="h-4 w-4 text-blue-400 shrink-0" />
+                <span>
+                  <strong className="text-blue-100">Tarif Terakhir ({suggestedRate.label}):</strong>{' '}
+                  <span className="font-mono">
+                    Pusat {formatRp(suggestedRate.hargaPusat)}/Kg · Vendor{' '}
+                    {formatRp(suggestedRate.hargaVendor)}/Kg · Tol. Susut{' '}
+                    {String(suggestedRate.toleransiSusutPersen).replace('.', ',')}%
+                  </span>
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setForm((p) => ({
+                    ...p,
+                    hargaPusatPerKg: String(suggestedRate.hargaPusat),
+                    hargaJualVendorPerKg: String(suggestedRate.hargaVendor),
+                    toleransiSusutPersen: String(suggestedRate.toleransiSusutPersen),
+                  }))
+                }
+                className="inline-flex min-h-[30px] items-center rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-500 whitespace-nowrap"
+              >
+                Pakai Tarif Ini
+              </button>
+            </div>
+          )}
+
           <div className="sm:col-span-2 lg:col-span-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div>
               <label htmlFor="rit-uangjalan" className="block text-xs font-semibold text-slate-300">
@@ -555,6 +690,82 @@ export function TambahRitaseView({
                 onChange={(e) => setForm((p) => ({ ...p, uangJalan: e.target.value }))}
                 className="mt-1.5 w-full min-h-[42px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
               />
+            </div>
+
+            <div className="sm:col-span-1 lg:col-span-2">
+              <span className="block text-xs font-semibold text-slate-300">
+                Sumber Pembayaran Uang Jalan
+              </span>
+              <div className="mt-1.5 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setForm((p) => ({ ...p, sumberUangJalan: 'Broker' }))}
+                  className={`min-h-[42px] rounded-lg border px-3 py-2 text-left text-xs font-semibold transition-colors ${
+                    form.sumberUangJalan === 'Broker'
+                      ? 'border-blue-500 bg-blue-950/70 text-blue-200'
+                      : 'border-slate-700 bg-slate-950 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                  }`}
+                >
+                  <div>Dari Broker</div>
+                  <div className="text-[10px] font-normal opacity-80">Talangan kita dulu</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setForm((p) => ({ ...p, sumberUangJalan: 'Pusat' }))}
+                  className={`min-h-[42px] rounded-lg border px-3 py-2 text-left text-xs font-semibold transition-colors ${
+                    form.sumberUangJalan === 'Pusat'
+                      ? 'border-amber-500 bg-amber-950/70 text-amber-200'
+                      : 'border-slate-700 bg-slate-950 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                  }`}
+                >
+                  <div>Dari Pusat</div>
+                  <div className="text-[10px] font-normal opacity-80">Potong tagihan Pusat</div>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="sm:col-span-2 lg:col-span-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="rit-gto" className="block text-xs font-semibold text-slate-300">
+                Biaya Kartu GTO (Rp){' '}
+                <span className="text-[11px] font-normal text-slate-400">(Opsional)</span>
+              </label>
+              <input
+                id="rit-gto"
+                type="number"
+                min={0}
+                step="1000"
+                value={form.biayaKartuGto}
+                onChange={(e) => setForm((p) => ({ ...p, biayaKartuGto: e.target.value }))}
+                placeholder="0 (kosongkan jika tidak pakai GTO)"
+                className="mt-1.5 w-full min-h-[42px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 tabular-nums placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              />
+              <p className="mt-1 text-[11px] text-slate-400">
+                Jika diisi &gt; 0, otomatis ditagihkan ke vendor dan muncul di Nota. Jika 0, baris GTO dihilangkan dari Nota.
+              </p>
+            </div>
+
+            <div>
+              <label htmlFor="rit-toleransi" className="block text-xs font-semibold text-slate-300">
+                Toleransi Susut Pabrik (%){' '}
+                <span className="text-[11px] font-normal text-slate-400">(Default 0,3%)</span>
+              </label>
+              <input
+                id="rit-toleransi"
+                type="number"
+                min={0}
+                max={100}
+                step="0.05"
+                value={form.toleransiSusutPersen}
+                onChange={(e) => setForm((p) => ({ ...p, toleransiSusutPersen: e.target.value }))}
+                placeholder="0.3"
+                className="mt-1.5 w-full min-h-[42px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 tabular-nums placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              />
+              <p className="mt-1 text-[11px] text-slate-400">
+                Sesuaikan aturan pabrik tujuan (contoh: 0,2 / 0,3 / 0,5). Isi 0 jika tanpa toleransi.
+              </p>
             </div>
           </div>
         </div>
@@ -571,46 +782,91 @@ export function TambahRitaseView({
         {/* Live Calculation Strip */}
         <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-800 bg-slate-950 p-4 sm:grid-cols-4">
           <div>
-            <div className="text-[11px] font-medium text-slate-400">Selisih Susut Timbang</div>
-            <div
-              className={`mt-1 font-mono text-sm font-bold tabular-nums ${
-                liveMetrics.susutKg > 0
-                  ? 'text-amber-400'
-                  : liveMetrics.susutKg < 0
-                  ? 'text-emerald-400'
-                  : 'text-slate-100'
-              }`}
-            >
-              {liveMetrics.susutKg > 0
-                ? `-${formatRibuan(liveMetrics.susutKg)} Kg (${liveMetrics.susutPersen.toFixed(2)}%)`
-                : liveMetrics.susutKg < 0
-                ? `+${formatRibuan(Math.abs(liveMetrics.susutKg))} Kg (Lebih)`
-                : '0 Kg (0,00%)'}
+            <div className="text-[11px] font-medium text-slate-400">
+              {liveMetrics.isSelesaiBongkar ? 'Selisih Susut Timbang' : 'Status Timbangan'}
             </div>
+            {liveMetrics.isSelesaiBongkar ? (
+              <>
+                <div
+                  className={`mt-1 font-mono text-sm font-bold tabular-nums ${
+                    liveMetrics.susutKg > 0 &&
+                    (Number(form.beratMuatKg) || 0) > 0 &&
+                    liveMetrics.susutPersen > liveMetrics.toleransiSusutPersen
+                      ? 'text-amber-400'
+                      : 'text-emerald-400'
+                  }`}
+                >
+                  {(Number(form.beratMuatKg) || 0) <= 0
+                    ? `Bongkar ${formatRibuan(Number(form.beratBongkarKg) || 0)} Kg`
+                    : liveMetrics.susutKg > 0
+                    ? `-${formatRibuan(liveMetrics.susutKg)} Kg (${liveMetrics.susutPersen.toFixed(2)}%)`
+                    : liveMetrics.susutKg < 0
+                    ? `+${formatRibuan(Math.abs(liveMetrics.susutKg))} Kg (Lebih)`
+                    : '0 Kg (0,00%)'}
+                </div>
+                {(Number(form.beratMuatKg) || 0) > 0 && (
+                  <div className="text-[10px] font-mono text-slate-400">
+                    Tol. {String(liveMetrics.toleransiSusutPersen).replace('.', ',')}% (
+                    {formatRibuan(
+                      Math.round(
+                        (Number(form.beratMuatKg) || 0) * (liveMetrics.toleransiSusutPersen / 100)
+                      )
+                    )}{' '}
+                    Kg)
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="mt-1 text-xs font-semibold text-amber-400">
+                {liveMetrics.timbanganStatus === 'Dalam Perjalanan'
+                  ? `Sudah Muat ${formatRibuan(Number(form.beratMuatKg) || 0)} Kg · Menunggu Bongkar`
+                  : 'Menunggu Timbang Muat'}
+              </div>
+            )}
           </div>
 
           <div>
-            <div className="text-[11px] font-medium text-slate-400">Tagihan dari Pusat</div>
-            <div className="mt-1 font-mono text-sm font-bold text-slate-100 tabular-nums">
-              {formatRp(liveMetrics.tagihanPusat)}
+            <div className="text-[11px] font-medium text-slate-400">
+              {form.sumberUangJalan === 'Pusat'
+                ? 'Sisa Tagihan Pusat (Potong UJ)'
+                : 'Tagihan dari Pusat'}
             </div>
+            <div className="mt-1 font-mono text-sm font-bold text-slate-100 tabular-nums">
+              {liveMetrics.isSelesaiBongkar ? formatRp(liveMetrics.tagihanPusat) : 'Menunggu Bongkar'}
+            </div>
+            {liveMetrics.isSelesaiBongkar && form.sumberUangJalan === 'Pusat' && liveMetrics.uangJalan > 0 && (
+              <div className="text-[10px] text-amber-300 font-mono">
+                Bruto {formatRp(liveMetrics.tagihanBrutoPusat)} − UJ {formatRp(liveMetrics.uangJalan)}
+              </div>
+            )}
           </div>
 
           <div>
             <div className="text-[11px] font-medium text-slate-400">Ongkos ke Vendor</div>
             <div className="mt-1 font-mono text-sm font-bold text-slate-100 tabular-nums">
-              {formatRp(liveMetrics.jumlahOngkosVendor)}
+              {liveMetrics.isSelesaiBongkar
+                ? formatRp(liveMetrics.jumlahOngkosVendor)
+                : 'Menunggu Bongkar'}
             </div>
+            {liveMetrics.biayaKartuGto > 0 && (
+              <div className="text-[10px] text-amber-300 font-mono">
+                Pot. GTO: {formatRp(liveMetrics.biayaKartuGto)}
+              </div>
+            )}
           </div>
 
           <div>
             <div className="text-[11px] font-medium text-slate-400">Keuntungan (Sisa Pusat)</div>
             <div
               className={`mt-1 font-mono text-sm font-bold tabular-nums ${
-                liveMetrics.keuntungan >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                !liveMetrics.isSelesaiBongkar
+                  ? 'text-slate-400'
+                  : liveMetrics.keuntungan >= 0
+                  ? 'text-emerald-400'
+                  : 'text-rose-400'
               }`}
             >
-              {formatRp(liveMetrics.keuntungan)}
+              {liveMetrics.isSelesaiBongkar ? formatRp(liveMetrics.keuntungan) : '-'}
             </div>
           </div>
         </div>

@@ -84,25 +84,32 @@ export function DashboardTab({
     let countPusatBelumDibayar = 0;
     let sisaKewajibanVendor = 0;
     let countVendorBelumLunas = 0;
+    let totalTagihanBrutoPusat = 0;
     let totalTagihanPusat = 0;
     let totalOngkosVendor = 0;
     let totalKeuntungan = 0;
     let sjBelumBalikCount = 0;
+    let pendingBongkarCount = 0;
 
     for (const r of filteredRitase) {
       const m = computeRitaseMetrics(r);
-      totalTagihanPusat += m.tagihanPusat;
-      totalOngkosVendor += m.jumlahOngkosVendor;
-      totalKeuntungan += m.keuntungan;
+      if (!m.isSelesaiBongkar) {
+        pendingBongkarCount += 1;
+      } else {
+        totalTagihanBrutoPusat += m.tagihanBrutoPusat;
+        totalTagihanPusat += m.tagihanPusat;
+        totalOngkosVendor += m.jumlahOngkosVendor;
+        totalKeuntungan += m.keuntungan;
 
-      if (r.pusatPaymentStatus === 'Belum Dibayar Pusat') {
-        tagihanPusatBelumDibayar += m.tagihanPusat;
-        countPusatBelumDibayar += 1;
-      }
+        if (r.pusatPaymentStatus === 'Belum Dibayar Pusat') {
+          tagihanPusatBelumDibayar += m.tagihanPusat;
+          countPusatBelumDibayar += 1;
+        }
 
-      if (r.vendorPaymentStatus === 'Belum Lunas') {
-        sisaKewajibanVendor += m.sisaKewajibanVendor;
-        countVendorBelumLunas += 1;
+        if (r.vendorPaymentStatus === 'Belum Lunas') {
+          sisaKewajibanVendor += m.sisaKewajibanVendor;
+          countVendorBelumLunas += 1;
+        }
       }
 
       if (r.docStatus === 'SJ & Tiket Timbang Belum Balik') {
@@ -115,10 +122,12 @@ export function DashboardTab({
       countPusatBelumDibayar,
       sisaKewajibanVendor,
       countVendorBelumLunas,
+      totalTagihanBrutoPusat,
       totalTagihanPusat,
       totalOngkosVendor,
       totalKeuntungan,
       sjBelumBalikCount,
+      pendingBongkarCount,
       totalRitaseCount: filteredRitase.length,
     };
   }, [filteredRitase]);
@@ -196,21 +205,30 @@ export function DashboardTab({
     [vendorSummaries]
   );
 
-  const pusatBillingItems = useMemo(() => {
-    return filteredRitase
-      .filter((r) => {
-        if (pusatVendorFilter !== 'all' && r.vendorId !== pusatVendorFilter) return false;
-        if (pusatPayFilter === 'unpaid' && r.pusatPaymentStatus !== 'Belum Dibayar Pusat')
-          return false;
-        if (pusatPayFilter === 'paid' && r.pusatPaymentStatus !== 'Sudah Dibayar Pusat')
-          return false;
-        return true;
-      })
+  const { pusatBillingItems, pusatPendingBongkarCount } = useMemo(() => {
+    const matched = filteredRitase.filter((r) => {
+      if (pusatVendorFilter !== 'all' && r.vendorId !== pusatVendorFilter) return false;
+      if (pusatPayFilter === 'unpaid' && r.pusatPaymentStatus !== 'Belum Dibayar Pusat')
+        return false;
+      if (pusatPayFilter === 'paid' && r.pusatPaymentStatus !== 'Sudah Dibayar Pusat')
+        return false;
+      return true;
+    });
+
+    const ready = matched
+      .filter((r) => computeRitaseMetrics(r).isSelesaiBongkar)
       .sort((a, b) => a.tanggalMuat.localeCompare(b.tanggalMuat));
+
+    return {
+      pusatBillingItems: ready,
+      pusatPendingBongkarCount: matched.length - ready.length,
+    };
   }, [filteredRitase, pusatVendorFilter, pusatPayFilter]);
 
   const pusatBillingTotals = useMemo(() => {
     let totalTonase = 0;
+    let totalTagihanBrutoPusat = 0;
+    let totalPotonganUjPusat = 0;
     let totalTagihanPusat = 0;
     let totalOngkosVendor = 0;
     let totalKeuntungan = 0;
@@ -219,6 +237,8 @@ export function DashboardTab({
     for (const r of pusatBillingItems) {
       const m = computeRitaseMetrics(r);
       totalTonase += r.beratBongkarKg || 0;
+      totalTagihanBrutoPusat += m.tagihanBrutoPusat;
+      totalPotonganUjPusat += m.uangJalanPusat;
       totalTagihanPusat += m.tagihanPusat;
       totalOngkosVendor += m.jumlahOngkosVendor;
       totalKeuntungan += m.keuntungan;
@@ -229,6 +249,8 @@ export function DashboardTab({
 
     return {
       totalTonase,
+      totalTagihanBrutoPusat,
+      totalPotonganUjPusat,
       totalTagihanPusat,
       totalOngkosVendor,
       totalKeuntungan,
@@ -252,18 +274,24 @@ export function DashboardTab({
     pusatBillingItems.forEach((r, idx) => {
       const m = computeRitaseMetrics(r);
       const vName = vendorMap.get(r.vendorId)?.name || 'Vendor';
+      const ujPusatNote =
+        m.uangJalanPusat > 0 ? ` - UJ Pusat ${formatRp(m.uangJalanPusat)}` : '';
       lines.push(
         `${idx + 1}. ${formatTanggalPendek(r.tanggalMuat)} | ${r.nopol} (${vName}) | ${
           r.jenisMuatan
         } (${r.lokasiMuat} -> ${r.lokasiBongkar}) | ${formatRibuan(
           r.beratBongkarKg
-        )} Kg x ${formatRp(r.hargaPusatPerKg)} = ${formatRp(m.tagihanPusat)}`
+        )} Kg x ${formatRp(r.hargaPusatPerKg)}${ujPusatNote} = ${formatRp(m.tagihanPusat)}`
       );
     });
 
     lines.push('');
     lines.push(`Total Tonase Bongkar: ${formatRibuan(pusatBillingTotals.totalTonase)} Kg`);
-    lines.push(`*Total Tagihan ke Pusat: ${formatRp(pusatBillingTotals.totalTagihanPusat)}*`);
+    if (pusatBillingTotals.totalPotonganUjPusat > 0) {
+      lines.push(`Total Tagihan Bruto: ${formatRp(pusatBillingTotals.totalTagihanBrutoPusat)}`);
+      lines.push(`Potongan UJ Pusat: -${formatRp(pusatBillingTotals.totalPotonganUjPusat)}`);
+    }
+    lines.push(`*Total Sisa Tagihan ke Pusat: ${formatRp(pusatBillingTotals.totalTagihanPusat)}*`);
 
     try {
       await navigator.clipboard.writeText(lines.join('\n'));
@@ -298,8 +326,8 @@ export function DashboardTab({
   };
 
   const marginPersen =
-    summary.totalTagihanPusat > 0
-      ? ((summary.totalKeuntungan / summary.totalTagihanPusat) * 100).toFixed(1)
+    summary.totalTagihanBrutoPusat > 0
+      ? ((summary.totalKeuntungan / summary.totalTagihanBrutoPusat) * 100).toFixed(1)
       : '0,0';
 
   const subMenuTitle =
@@ -396,7 +424,7 @@ export function DashboardTab({
               {formatRp(summary.totalKeuntungan)}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-x-2 text-xs text-slate-400 tabular-nums">
-              <span>Pusat {formatRp(summary.totalTagihanPusat)}</span>
+              <span>Pusat {formatRp(summary.totalTagihanBrutoPusat)}</span>
               <span aria-hidden="true">·</span>
               <span>Margin {marginPersen.replace('.', ',')}%</span>
             </div>
@@ -636,13 +664,13 @@ export function DashboardTab({
                                 {r.jenisMuatan} ({r.lokasiMuat} → {r.lokasiBongkar})
                               </td>
                               <td className="px-3 py-3 text-right font-mono text-slate-200 tabular-nums">
-                                {formatRibuan(r.beratBongkarKg)}
+                                {m.isSelesaiBongkar ? formatRibuan(r.beratBongkarKg) : m.timbanganStatus}
                               </td>
                               <td className="px-3 py-3 text-right font-mono font-semibold text-slate-100 tabular-nums">
-                                {formatRp(m.jumlahOngkosVendor)}
+                                {m.isSelesaiBongkar ? formatRp(m.jumlahOngkosVendor) : '-'}
                               </td>
                               <td className="px-3 py-3 text-right font-mono text-slate-300 tabular-nums">
-                                {formatRp(m.uangJalan)}
+                                {formatRp(m.uangJalan)} ({m.sumberUangJalan})
                               </td>
                               <td className="px-4 py-3 text-right font-semibold">
                                 <span
@@ -779,6 +807,12 @@ export function DashboardTab({
             </div>
           </div>
 
+          {pusatPendingBongkarCount > 0 && (
+            <div className="no-print rounded-xl border border-amber-700/60 bg-amber-950/35 px-4 py-3 text-xs text-amber-200">
+              Ada <strong className="text-amber-100">{pusatPendingBongkarCount} ritase</strong> belum diisi Berat Bongkar, sehingga belum dimasukkan ke tagihan Pusat.
+            </div>
+          )}
+
           {/* Printable White Paper Preview for Pusat Billing */}
           <div className="print-only-container rounded-xl border border-slate-700 bg-white p-5 sm:p-6 text-black">
             <h2 className="text-center text-base font-bold text-black sm:text-lg">
@@ -814,7 +848,8 @@ export function DashboardTab({
                       <th className="border border-slate-900 px-2 py-2 text-left">Muatan &amp; Rute</th>
                       <th className="border border-slate-900 px-2 py-2 text-right">Tonase (Kg)</th>
                       <th className="border border-slate-900 px-2 py-2 text-right">Harga Pusat/Kg</th>
-                      <th className="border border-slate-900 px-2 py-2 text-right">Tagihan Pusat (Rp)</th>
+                      <th className="border border-slate-900 px-2 py-2 text-right">Pot. UJ Pusat</th>
+                      <th className="border border-slate-900 px-2 py-2 text-right">Sisa Tagihan Pusat</th>
                       <th className="no-print border border-slate-900 px-2 py-2 text-center whitespace-nowrap">
                         Status Bayar Pusat (1-Klik)
                       </th>
@@ -847,6 +882,9 @@ export function DashboardTab({
                           <td className="border border-slate-900 px-2 py-1.5 text-right font-mono tabular-nums">
                             {formatRp(r.hargaPusatPerKg)}
                           </td>
+                          <td className="border border-slate-900 px-2 py-1.5 text-right font-mono tabular-nums">
+                            {m.uangJalanPusat > 0 ? formatRp(m.uangJalanPusat) : '-'}
+                          </td>
                           <td className="border border-slate-900 px-2 py-1.5 text-right font-mono font-semibold tabular-nums">
                             {formatRp(m.tagihanPusat)}
                           </td>
@@ -876,12 +914,17 @@ export function DashboardTab({
                     })}
                     <tr className="print-row-highlight bg-slate-200 font-bold text-black">
                       <td colSpan={5} className="border border-slate-900 px-3 py-2 text-right">
-                        Total Tagihan ke Pusat
+                        Total Sisa Tagihan ke Pusat
                       </td>
                       <td className="border border-slate-900 px-2 py-2 text-right font-mono tabular-nums">
                         {formatRibuan(pusatBillingTotals.totalTonase)}
                       </td>
                       <td className="border border-slate-900 px-2 py-2"></td>
+                      <td className="border border-slate-900 px-2 py-2 text-right font-mono tabular-nums">
+                        {pusatBillingTotals.totalPotonganUjPusat > 0
+                          ? formatRp(pusatBillingTotals.totalPotonganUjPusat)
+                          : '-'}
+                      </td>
                       <td className="border border-slate-900 px-2 py-2 text-right font-mono tabular-nums">
                         {formatRp(pusatBillingTotals.totalTagihanPusat)}
                       </td>

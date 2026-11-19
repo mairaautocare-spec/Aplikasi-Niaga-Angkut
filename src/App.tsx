@@ -35,6 +35,7 @@ export default function App() {
     deleteVendor,
     addRitase,
     updateRitase,
+    updateRitaseTimbangan,
     deleteRitase,
     toggleDocStatus,
     toggleVendorPaymentStatus,
@@ -462,6 +463,7 @@ export default function App() {
                   setEditingRitase(r);
                   setActiveMenu('tambah-ritase');
                 }}
+                onUpdateTimbangan={updateRitaseTimbangan}
                 onDeleteRitase={deleteRitase}
                 onToggleDocStatus={toggleDocStatus}
                 onToggleVendorPaymentStatus={toggleVendorPaymentStatus}

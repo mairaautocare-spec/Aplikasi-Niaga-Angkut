@@ -1,22 +1,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
-  Download,
   FileCheck2,
   FileClock,
+  FileSpreadsheet,
   Pencil,
   Plus,
   Search,
   Trash2,
 } from 'lucide-react';
 import { Ritase, Vendor } from '../types/transport';
+import { exportDaftarRitaseExcel } from '../utils/excelExport';
 import {
   computeRitaseMetrics,
-  downloadCsv,
   formatRibuan,
   formatRp,
   formatTanggalPendek,
-  getTodayIso,
 } from '../utils/formatters';
 
 interface DaftarRitaseViewProps {
@@ -101,56 +100,19 @@ export function DaftarRitaseView({
     vendorMap,
   ]);
 
-  const handleExportCsv = () => {
-    const headers = [
-      'No',
-      'Tanggal Muat',
-      'Vendor',
-      'Nopol',
-      'Sopir',
-      'Jenis Muatan',
-      'Lokasi Muat',
-      'Lokasi Bongkar',
-      'Berat Muat (Kg)',
-      'Berat Bongkar (Kg)',
-      'Susut (Kg)',
-      'Harga Pusat/Kg (Rp)',
-      'Tagihan Pusat (Rp)',
-      'Harga Jual ke Vendor/Kg (Rp)',
-      'Ongkos Vendor (Rp)',
-      'Uang Jalan (Rp)',
-      'Keuntungan (Rp)',
-      'Status Dokumen',
-      'Status Pembayaran Vendor',
-      'Status Pembayaran Pusat',
-    ];
-    const rows = filteredRitase.map((r, i) => {
-      const m = computeRitaseMetrics(r);
-      return [
-        i + 1,
-        r.tanggalMuat,
-        vendorMap.get(r.vendorId)?.name || 'Vendor Lainnya',
-        r.nopol,
-        r.namaSopir,
-        r.jenisMuatan,
-        r.lokasiMuat,
-        r.lokasiBongkar,
-        r.beratMuatKg,
-        r.beratBongkarKg,
-        m.susutKg,
-        r.hargaPusatPerKg,
-        m.tagihanPusat,
-        r.hargaJualVendorPerKg,
-        m.jumlahOngkosVendor,
-        m.uangJalan,
-        m.keuntungan,
-        r.docStatus,
-        r.vendorPaymentStatus,
-        r.pusatPaymentStatus,
-      ];
-    });
-    downloadCsv(`daftar-ritase-${getTodayIso()}.csv`, headers, rows);
-    onNotify('Daftar ritase berhasil diunduh ke format CSV (Excel).');
+  const [exportingExcel, setExportingExcel] = useState(false);
+
+  const handleExportExcel = async () => {
+    if (filteredRitase.length === 0 || exportingExcel) return;
+    setExportingExcel(true);
+    try {
+      const fileName = await exportDaftarRitaseExcel(filteredRitase, vendorMap);
+      onNotify(`Daftar ritase berhasil diunduh ke Excel (${fileName}).`);
+    } catch {
+      onNotify('Gagal mengekspor Excel daftar ritase.');
+    } finally {
+      setExportingExcel(false);
+    }
   };
 
   const ritaseToDelete = ritase.find((r) => r.id === confirmDeleteId);
@@ -170,12 +132,12 @@ export function DaftarRitaseView({
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            disabled={filteredRitase.length === 0}
-            onClick={handleExportCsv}
-            className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800 disabled:opacity-45 whitespace-nowrap"
+            disabled={filteredRitase.length === 0 || exportingExcel}
+            onClick={handleExportExcel}
+            className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-emerald-700 bg-emerald-800 px-3.5 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-45 whitespace-nowrap"
           >
-            <Download className="h-4 w-4" />
-            Download CSV
+            <FileSpreadsheet className="h-4 w-4" />
+            {exportingExcel ? 'Menyiapkan...' : 'Download Excel (.xlsx)'}
           </button>
 
           <button

@@ -7,7 +7,7 @@ import {
   Check,
   CheckCircle2,
   Copy,
-  Download,
+  FileSpreadsheet,
   FileWarning,
   Printer,
   Receipt,
@@ -15,15 +15,14 @@ import {
   Wallet,
 } from 'lucide-react';
 import { DashboardSubMenu, Ritase, Vendor } from '../types/transport';
+import { exportTagihanPusatExcel } from '../utils/excelExport';
 import {
   computeRitaseMetrics,
-  downloadCsv,
   formatBulanLabel,
   formatRibuan,
   formatRp,
   formatTanggalPendek,
   getCurrentMonthIso,
-  getTodayIso,
 } from '../utils/formatters';
 
 interface DashboardTabProps {
@@ -56,6 +55,7 @@ export function DashboardTab({
   const [pusatVendorFilter, setPusatVendorFilter] = useState<string>('all');
   const [pusatPayFilter, setPusatPayFilter] = useState<'unpaid' | 'paid' | 'all'>('unpaid');
   const [copiedPusatWa, setCopiedPusatWa] = useState(false);
+  const [exportingPusatExcel, setExportingPusatExcel] = useState(false);
 
   const availableMonths = useMemo(() => {
     const months = new Set<string>();
@@ -275,46 +275,26 @@ export function DashboardTab({
     }
   };
 
-  const handleExportPusatCsv = () => {
-    const headers = [
-      'No',
-      'Tanggal Muat',
-      'Vendor',
-      'Nopol',
-      'Sopir',
-      'Jenis Muatan',
-      'Muat',
-      'Bongkar',
-      'Berat Bongkar (Kg)',
-      'Harga Pusat/Kg (Rp)',
-      'Tagihan Pusat (Rp)',
-      'Harga Jual Vendor/Kg (Rp)',
-      'Ongkos Vendor (Rp)',
-      'Keuntungan (Rp)',
-      'Status Bayar Pusat',
-    ];
-    const rows = pusatBillingItems.map((r, i) => {
-      const m = computeRitaseMetrics(r);
-      return [
-        i + 1,
-        r.tanggalMuat,
-        vendorMap.get(r.vendorId)?.name || '-',
-        r.nopol,
-        r.namaSopir,
-        r.jenisMuatan,
-        r.lokasiMuat,
-        r.lokasiBongkar,
-        r.beratBongkarKg,
-        r.hargaPusatPerKg,
-        m.tagihanPusat,
-        r.hargaJualVendorPerKg,
-        m.jumlahOngkosVendor,
-        m.keuntungan,
-        r.pusatPaymentStatus,
-      ];
-    });
-    downloadCsv(`tagihan-pusat-${getTodayIso()}.csv`, headers, rows);
-    onNotify('File CSV tagihan ke Pusat berhasil diunduh.');
+  const handleExportPusatExcel = async () => {
+    if (pusatBillingItems.length === 0 || exportingPusatExcel) return;
+    setExportingPusatExcel(true);
+    try {
+      const scopeLabel =
+        pusatVendorFilter === 'all'
+          ? 'Semua Vendor (Gabungan)'
+          : vendorMap.get(pusatVendorFilter)?.name || 'Vendor Terpilih';
+      const fileName = await exportTagihanPusatExcel({
+        items: pusatBillingItems,
+        vendorMap,
+        scopeLabel,
+        periodeLabel: formatBulanLabel(selectedMonth),
+      });
+      onNotify(`File Excel tagihan ke Pusat (${fileName}) berhasil dibuat.`);
+    } catch {
+      onNotify('Gagal mengekspor Excel tagihan ke Pusat.');
+    } finally {
+      setExportingPusatExcel(false);
+    }
   };
 
   const marginPersen =
@@ -778,12 +758,12 @@ export function DashboardTab({
 
                 <button
                   type="button"
-                  disabled={pusatBillingItems.length === 0}
-                  onClick={handleExportPusatCsv}
-                  className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-950 px-3.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800 disabled:opacity-45 whitespace-nowrap"
+                  disabled={pusatBillingItems.length === 0 || exportingPusatExcel}
+                  onClick={handleExportPusatExcel}
+                  className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-emerald-700 bg-emerald-800 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-45 whitespace-nowrap"
                 >
-                  <Download className="h-3.5 w-3.5" />
-                  Download CSV
+                  <FileSpreadsheet className="h-3.5 w-3.5" />
+                  {exportingPusatExcel ? 'Menyiapkan...' : 'Download Excel (.xlsx)'}
                 </button>
 
                 <button

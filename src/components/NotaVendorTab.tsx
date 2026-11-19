@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, CheckCircle2, Copy, Printer } from 'lucide-react';
+import { Check, CheckCircle2, Copy, FileSpreadsheet, Printer } from 'lucide-react';
 import { NotaAdjustment, Ritase, Vendor } from '../types/transport';
+import { exportNotaVendorExcel } from '../utils/excelExport';
 import {
   computeRitaseMetrics,
   formatRibuan,
@@ -44,6 +45,7 @@ export function NotaVendorTab({
   const [statusFilter, setStatusFilter] = useState<NotaStatusFilter>('unpaid');
 
   const [copiedWa, setCopiedWa] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
   const [confirmLunasOpen, setConfirmLunasOpen] = useState(false);
 
   useEffect(() => {
@@ -272,6 +274,55 @@ export function NotaVendorTab({
     onNotify(
       `${unpaidIds.length} item ritase pada nota ini ditandai LUNAS. Seluruh data dan angkanya tetap tersimpan utuh di arsip.`
     );
+  };
+
+  const handleExportExcel = async () => {
+    if (filteredItems.length === 0 || exportingExcel) return;
+    setExportingExcel(true);
+    try {
+      const vendorLabel = isAllVendors
+        ? 'Semua Vendor (Rekap Gabungan)'
+        : selectedVendor?.name || '-';
+      const paymentLabel = isAllVendors
+        ? 'Sesuai rekening masing-masing vendor pada Master Data'
+        : selectedVendor?.paymentInfo || '-';
+      const periodeLabel =
+        dateFrom || dateTo
+          ? `${dateFrom ? formatTanggalPendek(dateFrom) : 'Awal'} s/d ${
+              dateTo ? formatTanggalPendek(dateTo) : 'Sekarang'
+            }`
+          : 'Semua Tanggal';
+      const statusLabel =
+        statusFilter === 'unpaid'
+          ? 'Belum Lunas'
+          : statusFilter === 'paid'
+          ? 'Arsip Lunas'
+          : 'Semua Data';
+
+      const fileName = await exportNotaVendorExcel({
+        vendorName: vendorLabel,
+        paymentInfo: paymentLabel,
+        periodeLabel,
+        statusLabel,
+        isAllVendors,
+        vendorMap,
+        items: filteredItems,
+        ritaseDetails: totals.ritaseDetails,
+        totalTonase: totals.totalTonase,
+        totalJumlahOngkos: totals.totalJumlahOngkos,
+        totalUangJalan: totals.totalUangJalan,
+        gtoVal: totals.gtoVal,
+        adaClaim: totals.adaClaim,
+        claimCount: totals.claimItems.length,
+        totalClaimSusutRp: totals.totalClaimSusutRp,
+        kekuranganPembayaran: totals.kekuranganPembayaran,
+      });
+      onNotify(`File Excel ${fileName} berhasil dibuat.`);
+    } catch {
+      onNotify('Gagal membuat file Excel. Silakan coba lagi.');
+    } finally {
+      setExportingExcel(false);
+    }
   };
 
   const colSpanCount = isAllVendors ? 8 : 7;
@@ -529,6 +580,16 @@ export function NotaVendorTab({
                 <Copy className="h-4 w-4" />
               )}
               {copiedWa ? 'Teks WA Tersalin' : 'Salin Teks Ringkasan WA'}
+            </button>
+
+            <button
+              type="button"
+              disabled={filteredItems.length === 0 || exportingExcel}
+              onClick={handleExportExcel}
+              className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-emerald-600 bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-45 whitespace-nowrap"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              {exportingExcel ? 'Menyiapkan Excel...' : 'Cetak / Download Excel (.xlsx)'}
             </button>
 
             <button

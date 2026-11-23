@@ -1,0 +1,74 @@
+{
+  "name": "niagaangkut-desktop",
+  "version": "1.0.0",
+  "description": "Aplikasi Desktop PC untuk Operasional Broker Transportasi Curah NiagaAngkut",
+  "author": "NiagaAngkut",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "build:win": "electron-builder --win --x64 --publish never",
+    "build:mac": "electron-builder --mac --publish never",
+    "build:linux": "electron-builder --linux --publish never"
+  },
+  "devDependencies": {
+    "electron": "^35.7.5",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.niagaangkut.desktop",
+    "productName": "NiagaAngkut",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.cjs",
+      "web-dist/**/*"
+    ],
+    "asar": true,
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "NiagaAngkut",
+      "artifactName": "NiagaAngkut-Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "NiagaAngkut-Portable.${ext}"
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "category": "public.app-category.business",
+      "artifactName": "NiagaAngkut-Mac-${arch}.${ext}",
+      "target": [
+        "dmg"
+      ]
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Office",
+      "artifactName": "NiagaAngkut-Linux.${ext}",
+      "target": [
+        "AppImage"
+      ]
+    }
+  }
+}

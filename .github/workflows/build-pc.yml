@@ -1,0 +1,89 @@
+name: Build Aplikasi PC Windows (NiagaAngkut)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies & build web app
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --legacy-peer-deps
+          else
+            npm install --legacy-peer-deps
+          fi
+          npm run build
+
+      - name: Siapkan aset desktop (web-dist & icon)
+        shell: bash
+        run: |
+          rm -rf desktop/web-dist desktop/build desktop/release
+          mkdir -p desktop/web-dist desktop/build
+          cp -r dist/* desktop/web-dist/
+          cp public/pwa-512x512.png desktop/build/icon.png
+
+      - name: Install Electron & Build Windows EXE (Setup + Portable)
+        shell: bash
+        working-directory: ./desktop
+        run: |
+          npm install --no-audit --no-fund
+          npx electron-builder --win --x64 --publish never
+
+      - name: Siapkan file EXE PC
+        shell: bash
+        run: |
+          SETUP_PATH="desktop/release/NiagaAngkut-Setup.exe"
+          PORTABLE_PATH="desktop/release/NiagaAngkut-Portable.exe"
+          if [ ! -f "$SETUP_PATH" ] || [ ! -f "$PORTABLE_PATH" ]; then
+            echo "Error: File EXE tidak ditemukan di desktop/release/"
+            ls -la desktop/release || true
+            exit 1
+          fi
+          cp "$SETUP_PATH" NiagaAngkut-Setup.exe
+          cp "$PORTABLE_PATH" NiagaAngkut-Portable.exe
+          ls -lh NiagaAngkut-Setup.exe NiagaAngkut-Portable.exe
+
+      - name: Upload File EXE ke Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: NiagaAngkut-PC-Windows
+          path: |
+            NiagaAngkut-Setup.exe
+            NiagaAngkut-Portable.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish Aplikasi PC ke GitHub Release
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view latest-pc >/dev/null 2>&1; then
+            gh release upload latest-pc NiagaAngkut-Setup.exe NiagaAngkut-Portable.exe --clobber
+          else
+            gh release create latest-pc NiagaAngkut-Setup.exe NiagaAngkut-Portable.exe \
+              --title "NiagaAngkut PC Windows (.exe)" \
+              --notes "Pilih NiagaAngkut-Setup.exe untuk install di PC/Laptop Windows (otomatis membuat shortcut Desktop), atau NiagaAngkut-Portable.exe untuk langsung jalankan tanpa instalasi."
+          fi

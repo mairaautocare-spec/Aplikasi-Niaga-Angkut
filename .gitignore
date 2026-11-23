@@ -8,3 +8,10 @@ coverage/
 !.env.example
 android/
 *.apk
+desktop/node_modules/
+desktop/release/
+desktop/web-dist/
+desktop/build/
+*.exe
+*.dmg
+*.AppImage

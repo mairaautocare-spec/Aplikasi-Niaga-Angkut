@@ -64,6 +64,57 @@ jobs:
           npx cap sync android
           printf "sdk.dir=%s\n" "$ANDROID_HOME" > android/local.properties
 
+      - name: Konfigurasi Keystore Tetap & Versi Naik Otomatis (Agar Update Tidak Perlu Uninstall)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
+          RUN_NUM: ${{ github.run_number }}
+        run: |
+          mkdir -p "$HOME/.android"
+          STORE_PASS="${KEYSTORE_PASS:-android}"
+          ALIAS_NAME="${KEY_ALIAS:-androiddebugkey}"
+          KEY_PASSWORD="${KEY_PASS:-android}"
+
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > android/app/debug.keystore
+          else
+            cp android-signing/debug.keystore android/app/debug.keystore
+          fi
+          cp android/app/debug.keystore "$HOME/.android/debug.keystore"
+          keytool -list -keystore android/app/debug.keystore -storepass "$STORE_PASS" >/dev/null
+
+          node -e '
+            const fs = require("fs");
+            const runNum = Number(process.env.RUN_NUM || 1);
+            const versionCode = 10 + runNum;
+            const versionName = `1.0.${runNum}`;
+            const storePass = process.env.KEYSTORE_PASS || "android";
+            const keyAlias = process.env.KEY_ALIAS || "androiddebugkey";
+            const keyPass = process.env.KEY_PASS || "android";
+
+            const gradlePath = "android/app/build.gradle";
+            let gradle = fs.readFileSync(gradlePath, "utf8");
+            gradle = gradle.replace(/versionCode\s+\d+/, `versionCode ${versionCode}`);
+            gradle = gradle.replace(/versionName\s+"[^"]+"/, `versionName "${versionName}"`);
+
+            const signingBlock = `    signingConfigs {\n        debug {\n            storeFile file("debug.keystore")\n            storePassword "${storePass}"\n            keyAlias "${keyAlias}"\n            keyPassword "${keyPass}"\n        }\n    }\n`;
+            if (!gradle.includes("signingConfigs")) {
+              gradle = gradle.replace(/buildTypes\s*\{/, `${signingBlock}    buildTypes {\n        debug {\n            signingConfig signingConfigs.debug\n        }`);
+            }
+            fs.writeFileSync(gradlePath, gradle, "utf8");
+
+            const manifestPath = "android/app/src/main/AndroidManifest.xml";
+            if (fs.existsSync(manifestPath)) {
+              let manifest = fs.readFileSync(manifestPath, "utf8");
+              if (!manifest.includes("requestLegacyExternalStorage")) {
+                manifest = manifest.replace("<application", "<application android:requestLegacyExternalStorage=\"true\"");
+                fs.writeFileSync(manifestPath, manifest, "utf8");
+              }
+            }
+          '
+
       - name: Build APK Debug
         working-directory: ./android
         run: |

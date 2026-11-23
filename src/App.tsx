@@ -1,14 +1,20 @@
 import React, { useRef, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import {
   Building2,
+  Check,
   ClipboardList,
+  Copy,
   Download,
   Eraser,
+  FileSpreadsheet,
   LayoutDashboard,
   MoreVertical,
   PlusCircle,
   Printer,
   RotateCcw,
+  Share2,
   Upload,
   X,
 } from 'lucide-react';
@@ -25,6 +31,7 @@ import {
   MainMenuId,
   Ritase,
 } from './types/transport';
+import { importDaftarRitaseFromExcel } from './utils/excelImport';
 import { getTodayIso } from './utils/formatters';
 
 export default function App() {
@@ -58,7 +65,14 @@ export default function App() {
   const [ritaseSjFilter, setRitaseSjFilter] = useState<'all' | 'belum' | 'lengkap'>('all');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
+  const [backupModalOpen, setBackupModalOpen] = useState(false);
+  const [copiedBackup, setCopiedBackup] = useState(false);
+  const [restoreModalOpen, setRestoreModalOpen] = useState(false);
+  const [restoreText, setRestoreText] = useState('');
+  const [replaceOnExcelImport, setReplaceOnExcelImport] = useState(true);
+  const [importingExcel, setImportingExcel] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const excelInputRef = useRef<HTMLInputElement>(null);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -89,43 +103,152 @@ export default function App() {
     setSidebarOpenMobile(false);
   };
 
-  const handleBackupJson = () => {
+  const buildBackupJsonString = () => {
     const payload = {
       app: 'NiagaAngkut',
       version: 2,
       exportedAt: new Date().toISOString(),
       data: db,
     };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    return JSON.stringify(payload, null, 2);
+  };
+
+  const makeBackupFileName = () => {
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    return `backup-niagaangkut-${getTodayIso()}-${hh}${mm}.json`;
+  };
+
+  const handleShareBackupFile = async (
+    providedJson?: string,
+    providedFileName?: string
+  ) => {
+    const jsonString = providedJson ?? buildBackupJsonString();
+    const fileName = providedFileName ?? makeBackupFileName();
+    const blob = new Blob([jsonString], {
+      type: 'application/json;charset=utf-8;',
+    });
+
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      const jsonFile = new File([blob], fileName, { type: 'application/json' });
+      const txtFile = new File([blob], fileName, { type: 'text/plain' });
+
+      try {
+        if (!navigator.canShare || navigator.canShare({ files: [jsonFile] })) {
+          await navigator.share({ files: [jsonFile], title: fileName });
+          showToast('Silakan pilih WhatsApp / Drive / File untuk menyimpan backup.');
+          return;
+        }
+        if (navigator.canShare({ files: [txtFile] })) {
+          await navigator.share({ files: [txtFile], title: fileName });
+          showToast('Silakan pilih WhatsApp / Drive / File untuk menyimpan backup.');
+          return;
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return;
+        }
+      }
+
+      try {
+        await navigator.share({ title: fileName, text: jsonString });
+        showToast('Data backup berhasil dibagikan sebagai teks.');
+        return;
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return;
+        }
+      }
+    }
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.style.display = 'none';
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+      document.body.removeChild(link);
+    }, 150);
+    showToast(`File ${fileName} sedang diunduh (cek folder Download).`);
+  };
+
+  const handleDownloadBackupFile = async () => {
+    const jsonString = buildBackupJsonString();
+    const fileName = makeBackupFileName();
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        try {
+          const perm = await Filesystem.checkPermissions();
+          if (perm.publicStorage !== 'granted') {
+            await Filesystem.requestPermissions();
+          }
+        } catch {
+          // Android 11+ does not require legacy storage permission for app-created Documents files
+        }
+
+        await Filesystem.writeFile({
+          path: `NiagaAngkut/${fileName}`,
+          data: jsonString,
+          directory: Directory.Documents,
+          encoding: Encoding.UTF8,
+          recursive: true,
+        });
+
+        showToast(
+          `Backup tersimpan di HP: folder Documents/NiagaAngkut/${fileName}`
+        );
+        return;
+      } catch {
+        // Fallback to Android share sheet if Documents write is unavailable on this device
+        await handleShareBackupFile(jsonString, fileName);
+        return;
+      }
+    }
+
+    const blob = new Blob([jsonString], {
       type: 'application/json;charset=utf-8;',
     });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
+    link.style.display = 'none';
     link.href = url;
-    link.download = `backup-niagaangkut-${getTodayIso()}.json`;
+    link.download = fileName;
     document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    showToast('File backup JSON berhasil diunduh ke perangkat Anda.');
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+      document.body.removeChild(link);
+    }, 150);
+    showToast(`File ${fileName} berhasil diunduh ke folder Download.`);
   };
 
-  const handleRestoreFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-
+  const handleCopyBackupJson = async () => {
     try {
-      const text = await file.text();
-      const parsed = JSON.parse(text);
+      await navigator.clipboard.writeText(buildBackupJsonString());
+      setCopiedBackup(true);
+      showToast('Kode backup JSON tersalin. Anda bisa tempel ke WhatsApp/Catatan/PC.');
+      setTimeout(() => setCopiedBackup(false), 2500);
+    } catch {
+      showToast('Gagal menyalin otomatis. Gunakan tombol Download / Bagikan File.');
+    }
+  };
+
+  const applyRestoreFromText = (rawText: string) => {
+    try {
+      const parsed = JSON.parse(rawText.trim());
       const candidate: Partial<BrokerDatabase> =
         parsed && parsed.data && typeof parsed.data === 'object' ? parsed.data : parsed;
 
       if (!Array.isArray(candidate.vendors) || !Array.isArray(candidate.ritase)) {
         showToast(
-          'Format file JSON tidak valid. Pastikan file berasal dari Backup Data NiagaAngkut.'
+          'Format JSON tidak valid. Pastikan berasal dari Backup Data NiagaAngkut.'
         );
-        return;
+        return false;
       }
 
       restoreDatabase({
@@ -136,9 +259,66 @@ export default function App() {
       showToast(
         `Restore berhasil: ${candidate.vendors.length} vendor dan ${candidate.ritase.length} ritase dipulihkan.`
       );
+      return true;
     } catch {
-      showToast('Gagal membaca file JSON. Periksa kembali file backup yang dipilih.');
+      showToast('Gagal membaca JSON. Pastikan isi file atau teks backup lengkap & tidak terpotong.');
+      return false;
     }
+  };
+
+  const processExcelImport = async (files: File[]) => {
+    setImportingExcel(true);
+    try {
+      const result = await importDaftarRitaseFromExcel(files, db, replaceOnExcelImport);
+      restoreDatabase(result.database);
+      const parts: string[] = [];
+      if (result.importedRitaseCount > 0) {
+        parts.push(`${result.importedRitaseCount} ritase`);
+      }
+      parts.push(`${result.totalVendorCount} vendor`);
+      if (result.updatedVendorInfoCount > 0) {
+        parts.push(`${result.updatedVendorInfoCount} rekening vendor diperbarui`);
+      }
+      showToast(`Import Excel berhasil: ${parts.join(', ')}.`);
+      setRestoreModalOpen(false);
+      setRestoreText('');
+    } catch (err) {
+      const msg =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Gagal membaca file Excel. Pastikan menggunakan file Daftar-Ritase-*.xlsx atau Nota-Pembayaran-*.xlsx dari NiagaAngkut.';
+      showToast(msg);
+    } finally {
+      setImportingExcel(false);
+    }
+  };
+
+  const handleRestoreFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    if (file.name.toLowerCase().endsWith('.xlsx')) {
+      await processExcelImport([file]);
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      if (applyRestoreFromText(text)) {
+        setRestoreModalOpen(false);
+        setRestoreText('');
+      }
+    } catch {
+      showToast('Gagal membuka file backup yang dipilih.');
+    }
+  };
+
+  const handleRestoreExcelChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    e.target.value = '';
+    if (files.length === 0) return;
+    await processExcelImport(files);
   };
 
   const isEmptyDb = db.vendors.length === 0 && db.ritase.length === 0;
@@ -292,7 +472,7 @@ export default function App() {
 
         <button
           type="button"
-          onClick={handleBackupJson}
+          onClick={() => setBackupModalOpen(true)}
           className="flex w-full min-h-[38px] items-center gap-2.5 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
         >
           <Download className="h-3.5 w-3.5 shrink-0" />
@@ -301,11 +481,11 @@ export default function App() {
 
         <button
           type="button"
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => setRestoreModalOpen(true)}
           className="flex w-full min-h-[38px] items-center gap-2.5 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
         >
           <Upload className="h-3.5 w-3.5 shrink-0" />
-          <span>Restore Data</span>
+          <span>Restore / Import Data</span>
         </button>
 
         {isEmptyDb ? (
@@ -339,10 +519,19 @@ export default function App() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".json,application/json"
+        accept=".json,.txt,.xlsx,application/json,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         onChange={handleRestoreFileChange}
         className="hidden"
-        aria-label="Pilih file JSON untuk Restore Data"
+        aria-label="Pilih file JSON atau Excel untuk Restore Data"
+      />
+      <input
+        ref={excelInputRef}
+        type="file"
+        multiple
+        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        onChange={handleRestoreExcelChange}
+        className="hidden"
+        aria-label="Pilih file Excel Daftar Ritase atau Nota Vendor untuk Import Data"
       />
 
       {/* Top Header Bar dengan Tombol Titik Tiga di Kiri Atas */}
@@ -497,6 +686,179 @@ export default function App() {
           </div>
         </main>
       </div>
+
+      {/* Modal Backup Data (Download/Bagikan File + Salin Kode JSON) */}
+      {backupModalOpen && (
+        <div
+          className="no-print fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-[1px]"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-2xl space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-slate-100">
+                  Backup Data NiagaAngkut
+                </h3>
+                <p className="mt-1 text-xs text-slate-400">
+                  Saat ini tersimpan {db.vendors.length} vendor &amp; {db.ritase.length} ritase.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBackupModalOpen(false)}
+                aria-label="Tutup modal backup"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                onClick={handleDownloadBackupFile}
+                className="flex w-full min-h-[42px] items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-500"
+              >
+                <Download className="h-4 w-4 shrink-0" />
+                <span>Unduh / Simpan File (.json) ke HP &amp; PC</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleShareBackupFile()}
+                className="flex w-full min-h-[40px] items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
+              >
+                <Share2 className="h-4 w-4 shrink-0" />
+                <span>Bagikan File (.json) ke WA / Drive</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCopyBackupJson}
+                className="flex w-full min-h-[40px] items-center justify-center gap-2 rounded-lg border border-emerald-700 bg-emerald-950/70 px-4 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-900/60"
+              >
+                {copiedBackup ? (
+                  <Check className="h-4 w-4 shrink-0 text-emerald-400" />
+                ) : (
+                  <Copy className="h-4 w-4 shrink-0" />
+                )}
+                <span>
+                  {copiedBackup
+                    ? 'Kode Backup Tersalin!'
+                    : 'Salin Kode Backup (untuk WA / Pindah ke PC)'}
+                </span>
+              </button>
+            </div>
+
+            <p className="text-[11px] leading-relaxed text-slate-400">
+              Di aplikasi HP Android, file tersimpan langsung di folder <strong className="text-slate-200">Documents/NiagaAngkut/</strong> (atau folder <strong className="text-slate-200">Download</strong> di PC).
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Restore / Import Data (.xlsx dari HP, File .json, atau Tempel Kode JSON) */}
+      {restoreModalOpen && (
+        <div
+          className="no-print fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-[1px]"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-2xl space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-slate-100">
+                  Restore / Pindah Data
+                </h3>
+                <p className="mt-1 text-xs text-slate-400">
+                  Import dari Excel hasil export HP (<code className="text-slate-300">.xlsx</code>), file backup <code className="text-slate-300">.json</code>, atau tempel kode backup.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRestoreModalOpen(false)}
+                aria-label="Tutup modal restore"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Pindah Data via Excel (.xlsx) */}
+            <div className="rounded-lg border border-emerald-800/60 bg-emerald-950/30 p-3.5 space-y-2.5">
+              <div className="text-xs font-semibold text-emerald-300">
+                Pindah Data dari Aplikasi HP Lama via Excel (.xlsx)
+              </div>
+              <p className="text-[11px] leading-relaxed text-slate-300">
+                Di aplikasi HP lama: buka <strong className="text-white">Daftar Ritase</strong> →{' '}
+                <strong className="text-white">Download Excel (.xlsx)</strong> (bisa juga sertakan{' '}
+                <strong className="text-white">Nota-Pembayaran-*.xlsx</strong> per vendor agar nomor rekening ikut terbaca otomatis).
+              </p>
+
+              <label className="flex items-start gap-2 text-[11px] text-slate-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={replaceOnExcelImport}
+                  onChange={(e) => setReplaceOnExcelImport(e.target.checked)}
+                  className="mt-0.5 h-3.5 w-3.5 rounded border-slate-600 bg-slate-950 text-emerald-500 focus:ring-emerald-500"
+                />
+                <span>
+                  Hapus data contoh / lama sebelum import (centang jika memindahkan ke PC baru)
+                </span>
+              </label>
+
+              <button
+                type="button"
+                disabled={importingExcel}
+                onClick={() => excelInputRef.current?.click()}
+                className="flex w-full min-h-[42px] items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-600 disabled:opacity-50"
+              >
+                <FileSpreadsheet className="h-4 w-4 shrink-0" />
+                <span>
+                  {importingExcel ? 'Membaca File Excel...' : 'Import Excel (.xlsx) — Ritase & Vendor'}
+                </span>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex w-full min-h-[40px] items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-800"
+            >
+              <Upload className="h-4 w-4 shrink-0" />
+              <span>Pilih File Backup (.json)</span>
+            </button>
+
+            <div className="border-t border-slate-800 pt-3 space-y-2">
+              <label htmlFor="restore-json-paste" className="block text-xs font-semibold text-slate-300">
+                Atau Tempel Kode Backup JSON di Sini:
+              </label>
+              <textarea
+                id="restore-json-paste"
+                rows={3}
+                value={restoreText}
+                onChange={(e) => setRestoreText(e.target.value)}
+                placeholder='{"app":"NiagaAngkut","version":2,...}'
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 p-2.5 font-mono text-[11px] text-slate-100 placeholder:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              />
+              <button
+                type="button"
+                disabled={!restoreText.trim()}
+                onClick={() => {
+                  if (applyRestoreFromText(restoreText)) {
+                    setRestoreModalOpen(false);
+                    setRestoreText('');
+                  }
+                }}
+                className="w-full min-h-[40px] rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-45 disabled:cursor-not-allowed"
+              >
+                Pulihkan dari Kode yang Ditempel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Confirm Clear All Data */}
       {confirmClearOpen && (

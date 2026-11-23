@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Download, Smartphone, WifiOff } from 'lucide-react';
+import { Download, Monitor, Smartphone, WifiOff, X } from 'lucide-react';
 import { useOnlineStatus, usePWAInstall } from '../hooks/usePWAInstall';
 
 interface PWAInstallButtonProps {
@@ -13,6 +13,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
 }) => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIOSGuide, setShowIOSGuide] = useState(false);
+  const [showPCGuide, setShowPCGuide] = useState(false);
 
   if (isInstalled) {
     return null;
@@ -95,6 +96,80 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
                 className="mt-5 w-full min-h-[40px] rounded-lg bg-slate-800 py-2 text-sm font-semibold text-slate-100 hover:bg-slate-700"
               >
                 Tutup
+              </button>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  // Fallback untuk PC/Desktop (saat prompt otomatis browser belum muncul / dibuka lewat preview)
+  if (variant === 'sidebar') {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => setShowPCGuide(true)}
+          className="flex w-full min-h-[38px] items-center gap-2.5 rounded-lg border border-emerald-700/70 bg-emerald-950/50 px-3 py-2 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-900/60"
+        >
+          <Monitor className="h-3.5 w-3.5 shrink-0" />
+          <span>Install di PC / Laptop</span>
+        </button>
+
+        {showPCGuide && (
+          <div
+            className="no-print fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-[1px]"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="w-full max-w-md rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-2xl space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Monitor className="h-5 w-5 text-emerald-400 shrink-0" />
+                  <h3 className="text-base font-semibold text-slate-100">
+                    Cara Install NiagaAngkut di PC / Laptop
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPCGuide(false)}
+                  aria-label="Tutup panduan"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs leading-relaxed text-slate-300">
+                <div className="rounded-lg border border-slate-800 bg-slate-950 p-3.5 space-y-1.5">
+                  <div className="font-semibold text-emerald-300">
+                    1. Lewat Browser PC (Chrome / Edge — Langsung Jadi Aplikasi)
+                  </div>
+                  <ol className="list-decimal space-y-1 pl-4">
+                    <li>Buka link aplikasi GitHub Pages Anda langsung di Google Chrome atau Microsoft Edge (tab penuh).</li>
+                    <li>Klik ikon <strong>Install (komputer + panah)</strong> di ujung kanan kolom alamat URL, atau buka menu <strong>⋮</strong> → <strong>Apps / Save and share</strong> → <strong>Install NiagaAngkut</strong>.</li>
+                  </ol>
+                </div>
+
+                <div className="rounded-lg border border-slate-800 bg-slate-950 p-3.5 space-y-1.5">
+                  <div className="font-semibold text-blue-300">
+                    2. File Aplikasi Windows (.exe) dari GitHub
+                  </div>
+                  <ol className="list-decimal space-y-1 pl-4">
+                    <li>Setelah kode terbaru di-push ke GitHub, buka repository Anda lalu klik tab <strong>Actions</strong> → <strong>Build Aplikasi PC Windows (NiagaAngkut)</strong> (tunggu centang hijau).</li>
+                    <li>Unduh file di bagian <strong>Artifacts (NiagaAngkut-PC-Windows)</strong> atau menu <strong>Releases → NiagaAngkut PC Windows (.exe)</strong>:</li>
+                    <li>Pilih <strong>NiagaAngkut-Setup.exe</strong> (install permanen) atau <strong>NiagaAngkut-Portable.exe</strong> (langsung buka tanpa install).</li>
+                  </ol>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowPCGuide(false)}
+                className="w-full min-h-[40px] rounded-lg bg-slate-800 py-2 text-sm font-semibold text-slate-100 hover:bg-slate-700"
+              >
+                Mengerti &amp; Tutup
               </button>
             </div>
           </div>

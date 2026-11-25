@@ -361,8 +361,19 @@ export function DaftarRitaseView({
                             {m.isSelesaiBongkar ? formatRp(m.jumlahOngkosVendor) : 'Menunggu Bongkar'}
                           </div>
                           <div className="mt-0.5 text-[11px] text-slate-400">
-                            UJ ({m.sumberUangJalan}): {formatRp(m.uangJalan)}
+                            UJ ({m.sumberUangJalan}
+                            {m.sumberUangJalan === 'Pusat'
+                              ? m.ujPusatMode === 'Di Hold Broker'
+                                ? ' · Hold Broker'
+                                : ' · Tf Vendor'
+                              : ''}
+                            ): {formatRp(m.uangJalan)}
                           </div>
+                          {m.uangJalanHoldBroker > 0 && (
+                            <div className="text-[10px] text-amber-300">
+                              Tidak potong vendor
+                            </div>
+                          )}
                           {m.biayaKartuGto > 0 && (
                             <div className="mt-0.5 text-[11px] text-amber-300">
                               GTO: {formatRp(m.biayaKartuGto)}
@@ -588,11 +599,22 @@ export function DaftarRitaseView({
                       </div>
                       <div className="text-right">
                         <div className="text-slate-400">
-                          Ongkos Vendor · UJ ({m.sumberUangJalan})
+                          Ongkos Vendor · UJ ({m.sumberUangJalan}
+                          {m.sumberUangJalan === 'Pusat'
+                            ? m.ujPusatMode === 'Di Hold Broker'
+                              ? ' · Hold Broker'
+                              : ' · Tf Vendor'
+                            : ''}
+                          )
                         </div>
                         <div className="font-mono font-semibold text-slate-100">
                           {m.isSelesaiBongkar ? formatRp(m.jumlahOngkosVendor) : 'Menunggu Bongkar'}
                         </div>
+                        {m.uangJalanHoldBroker > 0 && (
+                          <div className="font-mono text-[10px] text-amber-300">
+                            UJ {formatRp(m.uangJalanHoldBroker)} Hold Broker
+                          </div>
+                        )}
                         {m.biayaKartuGto > 0 && (
                           <div className="font-mono text-[11px] text-amber-300">
                             GTO: {formatRp(m.biayaKartuGto)}

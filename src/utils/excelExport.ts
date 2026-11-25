@@ -324,7 +324,7 @@ export async function exportNotaVendorExcel(params: ExportNotaExcelParams): Prom
       { value: r.beratBongkarKg || 0, type: Number, format: FORMAT_KG, align: 'right', ...DATA_CELL_BASE },
       { value: r.hargaJualVendorPerKg || 0, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
       { value: m.jumlahOngkosVendor, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
-      { value: m.uangJalan, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE }
+      { value: m.uangJalanVendor, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE }
     );
     rows.push(dataRow);
   });
@@ -524,7 +524,7 @@ export async function exportDaftarRitaseExcel(
   items: Ritase[],
   vendorMap: Map<string, Vendor>
 ): Promise<string> {
-  const totalCols = 25;
+  const totalCols = 26;
   const columns: SheetOptionsColumn[] = [
     { width: 6 },
     { width: 13 },
@@ -540,6 +540,7 @@ export async function exportDaftarRitaseExcel(
     { width: 14 },
     { width: 12 },
     { width: 13 },
+    { width: 17 },
     { width: 17 },
     { width: 20 },
     { width: 18 },
@@ -591,6 +592,7 @@ export async function exportDaftarRitaseExcel(
       { value: 'Susut (Kg)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Susut (%)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Tol. Susut (%)', type: String, align: 'right', ...HEADER_CELL_BASE },
+      { value: 'Harga Claim/Kg (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Harga Pusat/Kg (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Sisa Tagihan Pusat (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Harga Vendor/Kg (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
@@ -640,12 +642,23 @@ export async function exportDaftarRitaseExcel(
       { value: m.susutKg, type: Number, format: FORMAT_KG, align: 'right', ...DATA_CELL_BASE },
       { value: m.susutPersen, type: Number, format: FORMAT_PCT, align: 'right', ...DATA_CELL_BASE },
       { value: m.toleransiSusutPersen, type: Number, format: FORMAT_PCT, align: 'right', ...DATA_CELL_BASE },
+      { value: r.hargaClaimSusutPerKg || 0, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
       { value: r.hargaPusatPerKg || 0, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
       { value: m.tagihanPusat, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
       { value: r.hargaJualVendorPerKg || 0, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
       { value: m.jumlahOngkosVendor, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
       { value: m.uangJalan, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
-      { value: m.sumberUangJalan, type: String, align: 'center', ...DATA_CELL_BASE },
+      {
+        value:
+          m.sumberUangJalan === 'Pusat'
+            ? m.ujPusatMode === 'Di Hold Broker'
+              ? 'Pusat (Hold Broker)'
+              : 'Pusat (Transfer Vendor)'
+            : 'Broker',
+        type: String,
+        align: 'center',
+        ...DATA_CELL_BASE,
+      },
       { value: m.biayaKartuGto, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
       { value: m.keuntungan, type: Number, format: FORMAT_RP, align: 'right', fontWeight: 'bold', ...DATA_CELL_BASE },
       { value: r.docStatus, type: String, align: 'left', ...DATA_CELL_BASE },
@@ -659,6 +672,7 @@ export async function exportDaftarRitaseExcel(
     { value: totalMuat, type: Number, format: FORMAT_KG, align: 'right', ...HIGHLIGHT_CELL_BASE },
     { value: totalBongkar, type: Number, format: FORMAT_KG, align: 'right', ...HIGHLIGHT_CELL_BASE },
     { value: totalSusut, type: Number, format: FORMAT_KG, align: 'right', ...HIGHLIGHT_CELL_BASE },
+    { value: '', type: String, ...HIGHLIGHT_CELL_BASE },
     { value: '', type: String, ...HIGHLIGHT_CELL_BASE },
     { value: '', type: String, ...HIGHLIGHT_CELL_BASE },
     { value: '', type: String, ...HIGHLIGHT_CELL_BASE },

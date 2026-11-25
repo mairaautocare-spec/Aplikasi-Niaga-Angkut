@@ -7,6 +7,7 @@ import {
   Check,
   CheckCircle2,
   Copy,
+  FileDown,
   FileSpreadsheet,
   FileWarning,
   Printer,
@@ -23,7 +24,9 @@ import {
   formatRp,
   formatTanggalPendek,
   getCurrentMonthIso,
+  getTodayIso,
 } from '../utils/formatters';
+import { isElectronDesktop, printCurrentPage, savePageAsPdf } from '../utils/printHelper';
 
 interface DashboardTabProps {
   vendors: Vendor[];
@@ -51,9 +54,11 @@ export function DashboardTab({
   const [selectedMonth, setSelectedMonth] = useState<string>('all');
   const [selectedVendorId, setSelectedVendorId] = useState<string>(vendors[0]?.id || '');
 
-  // Sub-menu Tagihan ke Pusat (bisa pilih Semua Vendor atau Per Vendor)
+  // Sub-menu Tagihan ke Pusat (bisa pilih Semua Vendor / Per Vendor + rentang tanggal)
   const [pusatVendorFilter, setPusatVendorFilter] = useState<string>('all');
   const [pusatPayFilter, setPusatPayFilter] = useState<'unpaid' | 'paid' | 'all'>('unpaid');
+  const [pusatDateFrom, setPusatDateFrom] = useState<string>('');
+  const [pusatDateTo, setPusatDateTo] = useState<string>('');
   const [copiedPusatWa, setCopiedPusatWa] = useState(false);
   const [exportingPusatExcel, setExportingPusatExcel] = useState(false);
 
@@ -208,6 +213,8 @@ export function DashboardTab({
   const { pusatBillingItems, pusatPendingBongkarCount } = useMemo(() => {
     const matched = filteredRitase.filter((r) => {
       if (pusatVendorFilter !== 'all' && r.vendorId !== pusatVendorFilter) return false;
+      if (pusatDateFrom && r.tanggalMuat < pusatDateFrom) return false;
+      if (pusatDateTo && r.tanggalMuat > pusatDateTo) return false;
       if (pusatPayFilter === 'unpaid' && r.pusatPaymentStatus !== 'Belum Dibayar Pusat')
         return false;
       if (pusatPayFilter === 'paid' && r.pusatPaymentStatus !== 'Sudah Dibayar Pusat')
@@ -223,7 +230,14 @@ export function DashboardTab({
       pusatBillingItems: ready,
       pusatPendingBongkarCount: matched.length - ready.length,
     };
-  }, [filteredRitase, pusatVendorFilter, pusatPayFilter]);
+  }, [filteredRitase, pusatVendorFilter, pusatPayFilter, pusatDateFrom, pusatDateTo]);
+
+  const pusatPeriodeLabel =
+    pusatDateFrom || pusatDateTo
+      ? `${pusatDateFrom ? formatTanggalPendek(pusatDateFrom) : 'Awal'} s/d ${
+          pusatDateTo ? formatTanggalPendek(pusatDateTo) : 'Sekarang'
+        }`
+      : formatBulanLabel(selectedMonth);
 
   const pusatBillingTotals = useMemo(() => {
     let totalTonase = 0;
@@ -266,7 +280,7 @@ export function DashboardTab({
 
     const lines: string[] = [
       '*REKAP TAGIHAN ANGKUTAN KE PUSAT*',
-      `Periode: ${formatBulanLabel(selectedMonth)}`,
+      `Periode: ${pusatPeriodeLabel}`,
       `Cakupan Vendor: ${scopeLabel}`,
       '',
     ];
@@ -315,7 +329,7 @@ export function DashboardTab({
         items: pusatBillingItems,
         vendorMap,
         scopeLabel,
-        periodeLabel: formatBulanLabel(selectedMonth),
+        periodeLabel: pusatPeriodeLabel,
       });
       onNotify(`File Excel tagihan ke Pusat (${fileName}) berhasil dibuat.`);
     } catch {
@@ -670,7 +684,13 @@ export function DashboardTab({
                                 {m.isSelesaiBongkar ? formatRp(m.jumlahOngkosVendor) : '-'}
                               </td>
                               <td className="px-3 py-3 text-right font-mono text-slate-300 tabular-nums">
-                                {formatRp(m.uangJalan)} ({m.sumberUangJalan})
+                                {formatRp(m.uangJalan)} ({m.sumberUangJalan}
+                                {m.sumberUangJalan === 'Pusat'
+                                  ? m.ujPusatMode === 'Di Hold Broker'
+                                    ? ' · Hold Broker'
+                                    : ' · Tf Vendor'
+                                  : ''}
+                                )
                               </td>
                               <td className="px-4 py-3 text-right font-semibold">
                                 <span
@@ -703,7 +723,7 @@ export function DashboardTab({
       {subMenu === 'tagihan-pusat' && (
         <div className="space-y-4">
           <div className="no-print rounded-xl border border-slate-800 bg-slate-900 p-5 space-y-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
               <div>
                 <label htmlFor="pusat-vendor-filter" className="block text-xs font-semibold text-slate-300">
                   Cakupan Vendor
@@ -739,6 +759,46 @@ export function DashboardTab({
                   <option value="paid">Sudah Dibayar Pusat</option>
                   <option value="all">Semua Status</option>
                 </select>
+              </div>
+
+              <div>
+                <label htmlFor="pusat-date-from" className="block text-xs font-semibold text-slate-300">
+                  Dari Tanggal Muat
+                </label>
+                <input
+                  id="pusat-date-from"
+                  type="date"
+                  value={pusatDateFrom}
+                  onChange={(e) => setPusatDateFrom(e.target.value)}
+                  className="mt-1.5 w-full min-h-[40px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="pusat-date-to" className="block text-xs font-semibold text-slate-300">
+                  Sampai Tanggal Muat
+                </label>
+                <div className="mt-1.5 flex items-center gap-2">
+                  <input
+                    id="pusat-date-to"
+                    type="date"
+                    value={pusatDateTo}
+                    onChange={(e) => setPusatDateTo(e.target.value)}
+                    className="w-full min-h-[40px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  />
+                  {(pusatDateFrom || pusatDateTo) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPusatDateFrom('');
+                        setPusatDateTo('');
+                      }}
+                      className="min-h-[40px] rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800 whitespace-nowrap"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="flex flex-col justify-end rounded-lg border border-slate-800 bg-slate-950 px-4 py-2.5">
@@ -794,14 +854,28 @@ export function DashboardTab({
                   {exportingPusatExcel ? 'Menyiapkan...' : 'Download Excel (.xlsx)'}
                 </button>
 
+                {isElectronDesktop() && (
+                  <button
+                    type="button"
+                    disabled={pusatBillingItems.length === 0}
+                    onClick={() =>
+                      savePageAsPdf(`Tagihan-Ke-Pusat-${getTodayIso()}.pdf`, onNotify)
+                    }
+                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-blue-700 bg-blue-950/70 px-3.5 py-1.5 text-xs font-semibold text-blue-200 hover:bg-blue-900/60 disabled:opacity-45 whitespace-nowrap"
+                  >
+                    <FileDown className="h-3.5 w-3.5" />
+                    Simpan PDF
+                  </button>
+                )}
+
                 <button
                   type="button"
                   disabled={pusatBillingItems.length === 0}
-                  onClick={() => window.print()}
+                  onClick={() => printCurrentPage()}
                   className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-45 whitespace-nowrap"
                 >
                   <Printer className="h-3.5 w-3.5" />
-                  Cetak Tagihan Pusat
+                  Cetak / Print Tagihan Pusat
                 </button>
               </div>
             </div>
@@ -814,22 +888,35 @@ export function DashboardTab({
           )}
 
           {/* Printable White Paper Preview for Pusat Billing */}
-          <div className="print-only-container rounded-xl border border-slate-700 bg-white p-5 sm:p-6 text-black">
-            <h2 className="text-center text-base font-bold text-black sm:text-lg">
+          <div className="print-only-container rounded-xl border border-slate-700 bg-white p-5 sm:p-8 text-black">
+            <h2 className="text-center text-lg font-bold tracking-tight text-black sm:text-xl">
               Rekap Tagihan Angkutan ke Pusat
             </h2>
-            <div className="mt-2 mb-4 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-700">
-              <span>
-                Vendor:{' '}
-                <strong className="text-black">
+
+            <div className="mt-4 mb-4 grid grid-cols-1 gap-y-1 text-xs text-black sm:grid-cols-2 sm:gap-x-6 sm:text-sm">
+              <div className="grid grid-cols-[120px_12px_1fr] gap-y-1">
+                <div className="font-semibold">Kepada</div>
+                <div className="font-semibold">:</div>
+                <div className="font-semibold">Pusat</div>
+
+                <div className="font-semibold">Cakupan Vendor</div>
+                <div className="font-semibold">:</div>
+                <div>
                   {pusatVendorFilter === 'all'
-                    ? 'Semua Vendor'
+                    ? 'Semua Vendor (Gabungan)'
                     : vendorMap.get(pusatVendorFilter)?.name || '-'}
-                </strong>
-              </span>
-              <span>
-                Periode: <strong className="text-black">{formatBulanLabel(selectedMonth)}</strong>
-              </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-[120px_12px_1fr] gap-y-1 sm:justify-end">
+                <div className="font-semibold">Periode</div>
+                <div className="font-semibold">:</div>
+                <div>{pusatPeriodeLabel}</div>
+
+                <div className="font-semibold">Tanggal Cetak</div>
+                <div className="font-semibold">:</div>
+                <div>{formatTanggalPendek(getTodayIso())}</div>
+              </div>
             </div>
 
             {pusatBillingItems.length === 0 ? (
@@ -842,14 +929,36 @@ export function DashboardTab({
                   <thead>
                     <tr className="bg-slate-200 font-bold text-black">
                       <th className="border border-slate-900 px-2 py-2 text-center w-9">No</th>
-                      <th className="border border-slate-900 px-2 py-2 text-center">Tanggal</th>
-                      <th className="border border-slate-900 px-2 py-2 text-left">Vendor</th>
-                      <th className="border border-slate-900 px-2 py-2 text-center">Nopol</th>
-                      <th className="border border-slate-900 px-2 py-2 text-left">Muatan &amp; Rute</th>
-                      <th className="border border-slate-900 px-2 py-2 text-right">Tonase (Kg)</th>
-                      <th className="border border-slate-900 px-2 py-2 text-right">Harga Pusat/Kg</th>
-                      <th className="border border-slate-900 px-2 py-2 text-right">Pot. UJ Pusat</th>
-                      <th className="border border-slate-900 px-2 py-2 text-right">Sisa Tagihan Pusat</th>
+                      <th className="border border-slate-900 px-2 py-2 text-center whitespace-nowrap">
+                        Tanggal
+                      </th>
+                      {pusatVendorFilter === 'all' && (
+                        <th className="border border-slate-900 px-2 py-2 text-left">Vendor</th>
+                      )}
+                      <th className="border border-slate-900 px-2 py-2 text-center whitespace-nowrap">
+                        Nopol
+                      </th>
+                      <th className="border border-slate-900 px-2 py-2 text-left">Sopir</th>
+                      <th className="border border-slate-900 px-2 py-2 text-left">Jenis Muatan</th>
+                      <th className="border border-slate-900 px-2 py-2 text-left">Muat</th>
+                      <th className="border border-slate-900 px-2 py-2 text-left">Bongkar</th>
+                      <th className="border border-slate-900 px-2 py-2 text-right whitespace-nowrap">
+                        Tonase (Kg)
+                      </th>
+                      <th className="border border-slate-900 px-2 py-2 text-right whitespace-nowrap">
+                        Harga/Kg
+                      </th>
+                      <th className="border border-slate-900 px-2 py-2 text-right whitespace-nowrap">
+                        Tagihan Bruto
+                      </th>
+                      {pusatBillingTotals.totalPotonganUjPusat > 0 && (
+                        <th className="border border-slate-900 px-2 py-2 text-right whitespace-nowrap">
+                          Pot. UJ Pusat
+                        </th>
+                      )}
+                      <th className="border border-slate-900 px-2 py-2 text-right whitespace-nowrap">
+                        Tagihan Bersih
+                      </th>
                       <th className="no-print border border-slate-900 px-2 py-2 text-center whitespace-nowrap">
                         Status Bayar Pusat (1-Klik)
                       </th>
@@ -861,31 +970,39 @@ export function DashboardTab({
                       const isPusatPaid = r.pusatPaymentStatus === 'Sudah Dibayar Pusat';
                       return (
                         <tr key={r.id}>
-                          <td className="border border-slate-900 px-2 py-1.5 text-center font-mono">
+                          <td className="border border-slate-900 px-2 py-1.5 text-center font-mono tabular-nums">
                             {idx + 1}
                           </td>
-                          <td className="border border-slate-900 px-2 py-1.5 text-center font-mono whitespace-nowrap">
+                          <td className="border border-slate-900 px-2 py-1.5 text-center font-mono whitespace-nowrap tabular-nums">
                             {formatTanggalPendek(r.tanggalMuat)}
                           </td>
-                          <td className="border border-slate-900 px-2 py-1.5">
-                            {vendorMap.get(r.vendorId)?.name || '-'}
-                          </td>
-                          <td className="border border-slate-900 px-2 py-1.5 text-center font-mono whitespace-nowrap">
+                          {pusatVendorFilter === 'all' && (
+                            <td className="border border-slate-900 px-2 py-1.5">
+                              {vendorMap.get(r.vendorId)?.name || '-'}
+                            </td>
+                          )}
+                          <td className="border border-slate-900 px-2 py-1.5 text-center font-mono font-semibold whitespace-nowrap">
                             {r.nopol}
                           </td>
-                          <td className="border border-slate-900 px-2 py-1.5">
-                            {r.jenisMuatan} ({r.lokasiMuat} → {r.lokasiBongkar})
-                          </td>
+                          <td className="border border-slate-900 px-2 py-1.5">{r.namaSopir}</td>
+                          <td className="border border-slate-900 px-2 py-1.5">{r.jenisMuatan}</td>
+                          <td className="border border-slate-900 px-2 py-1.5">{r.lokasiMuat}</td>
+                          <td className="border border-slate-900 px-2 py-1.5">{r.lokasiBongkar}</td>
                           <td className="border border-slate-900 px-2 py-1.5 text-right font-mono tabular-nums">
                             {formatRibuan(r.beratBongkarKg)}
                           </td>
-                          <td className="border border-slate-900 px-2 py-1.5 text-right font-mono tabular-nums">
+                          <td className="border border-slate-900 px-2 py-1.5 text-right font-mono tabular-nums whitespace-nowrap">
                             {formatRp(r.hargaPusatPerKg)}
                           </td>
-                          <td className="border border-slate-900 px-2 py-1.5 text-right font-mono tabular-nums">
-                            {m.uangJalanPusat > 0 ? formatRp(m.uangJalanPusat) : '-'}
+                          <td className="border border-slate-900 px-2 py-1.5 text-right font-mono tabular-nums whitespace-nowrap">
+                            {formatRp(m.tagihanBrutoPusat)}
                           </td>
-                          <td className="border border-slate-900 px-2 py-1.5 text-right font-mono font-semibold tabular-nums">
+                          {pusatBillingTotals.totalPotonganUjPusat > 0 && (
+                            <td className="border border-slate-900 px-2 py-1.5 text-right font-mono tabular-nums whitespace-nowrap">
+                              {m.uangJalanPusat > 0 ? formatRp(m.uangJalanPusat) : '-'}
+                            </td>
+                          )}
+                          <td className="border border-slate-900 px-2 py-1.5 text-right font-mono font-semibold tabular-nums whitespace-nowrap">
                             {formatRp(m.tagihanPusat)}
                           </td>
                           <td className="no-print border border-slate-900 px-2 py-1.5 text-center whitespace-nowrap">
@@ -913,19 +1030,25 @@ export function DashboardTab({
                       );
                     })}
                     <tr className="print-row-highlight bg-slate-200 font-bold text-black">
-                      <td colSpan={5} className="border border-slate-900 px-3 py-2 text-right">
+                      <td
+                        colSpan={pusatVendorFilter === 'all' ? 8 : 7}
+                        className="border border-slate-900 px-3 py-2 text-right"
+                      >
                         Total Sisa Tagihan ke Pusat
                       </td>
                       <td className="border border-slate-900 px-2 py-2 text-right font-mono tabular-nums">
                         {formatRibuan(pusatBillingTotals.totalTonase)}
                       </td>
                       <td className="border border-slate-900 px-2 py-2"></td>
-                      <td className="border border-slate-900 px-2 py-2 text-right font-mono tabular-nums">
-                        {pusatBillingTotals.totalPotonganUjPusat > 0
-                          ? formatRp(pusatBillingTotals.totalPotonganUjPusat)
-                          : '-'}
+                      <td className="border border-slate-900 px-2 py-2 text-right font-mono tabular-nums whitespace-nowrap">
+                        {formatRp(pusatBillingTotals.totalTagihanBrutoPusat)}
                       </td>
-                      <td className="border border-slate-900 px-2 py-2 text-right font-mono tabular-nums">
+                      {pusatBillingTotals.totalPotonganUjPusat > 0 && (
+                        <td className="border border-slate-900 px-2 py-2 text-right font-mono tabular-nums whitespace-nowrap">
+                          {formatRp(pusatBillingTotals.totalPotonganUjPusat)}
+                        </td>
+                      )}
+                      <td className="border border-slate-900 px-2 py-2 text-right font-mono tabular-nums whitespace-nowrap">
                         {formatRp(pusatBillingTotals.totalTagihanPusat)}
                       </td>
                       <td className="no-print border border-slate-900 px-2 py-2"></td>

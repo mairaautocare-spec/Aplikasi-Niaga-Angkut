@@ -43,11 +43,17 @@
 
   html {
     color-scheme: light !important;
+    background: #ffffff !important;
   }
 
-  body {
+  body,
+  .app-shell-root,
+  main {
     background: #ffffff !important;
     color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    min-height: auto !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
@@ -72,6 +78,15 @@
     border-collapse: collapse !important;
     font-size: 10px !important;
     color: #000000 !important;
+  }
+
+  .print-table thead {
+    display: table-header-group;
+  }
+
+  .print-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   .print-table th,

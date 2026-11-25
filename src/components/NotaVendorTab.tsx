@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, CheckCircle2, Copy, FileSpreadsheet, Printer } from 'lucide-react';
+import { Check, CheckCircle2, Copy, FileDown, FileSpreadsheet, Printer } from 'lucide-react';
 import { NotaAdjustment, Ritase, Vendor } from '../types/transport';
 import { exportNotaVendorExcel } from '../utils/excelExport';
 import {
@@ -8,7 +8,9 @@ import {
   formatRp,
   formatTanggalPendek,
   formatUangJalanCell,
+  getTodayIso,
 } from '../utils/formatters';
+import { isElectronDesktop, printCurrentPage, savePageAsPdf } from '../utils/printHelper';
 
 interface NotaVendorTabProps {
   vendors: Vendor[];
@@ -118,7 +120,7 @@ export function NotaVendorTab({
       const m = computeRitaseMetrics(r);
       totalTonase += r.beratBongkarKg || 0;
       totalJumlahOngkos += m.jumlahOngkosVendor;
-      totalUangJalan += m.uangJalan;
+      totalUangJalan += m.uangJalanVendor;
       totalGto += m.biayaKartuGto;
       if (m.biayaKartuGto > 0) {
         gtoItems.push({ r, biayaKartuGto: m.biayaKartuGto });
@@ -145,8 +147,14 @@ export function NotaVendorTab({
         beratMuatKg > 0 ? Math.max(0, susutAktualKg - toleransiKg) : 0;
       const kenaClaim = susutKenaClaimKg > 0;
 
-      const tarifStr =
-        currentAdj.tarifClaimPerRitase?.[r.id] ?? currentAdj.tarifClaimPerKg ?? '0';
+      const perRitaseTarif = currentAdj.tarifClaimPerRitase?.[r.id];
+      const defaultNotaTarif =
+        currentAdj.tarifClaimPerKg && Number(currentAdj.tarifClaimPerKg) > 0
+          ? currentAdj.tarifClaimPerKg
+          : undefined;
+      const ritaseSavedTarif =
+        (r.hargaClaimSusutPerKg || 0) > 0 ? String(r.hargaClaimSusutPerKg) : undefined;
+      const tarifStr = perRitaseTarif ?? defaultNotaTarif ?? ritaseSavedTarif ?? '0';
       const hargaClaimPerKg = Math.max(0, Number(tarifStr) || 0);
       const claimSusutRp = kenaClaim ? Math.round(susutKenaClaimKg * hargaClaimPerKg) : 0;
 
@@ -233,7 +241,7 @@ export function NotaVendorTab({
       const m = computeRitaseMetrics(r);
       const vPrefix = isAllVendors ? `[${vendorMap.get(r.vendorId)?.name || 'Vendor'}] ` : '';
       const extras: string[] = [];
-      if (m.uangJalan > 0) extras.push(`DP: ${formatRp(m.uangJalan)}`);
+      if (m.uangJalanVendor > 0) extras.push(`DP: ${formatRp(m.uangJalanVendor)}`);
       if (m.biayaKartuGto > 0) extras.push(`GTO: ${formatRp(m.biayaKartuGto)}`);
       lines.push(
         `${idx + 1}. ${vPrefix}${formatTanggalPendek(r.tanggalMuat)} | ${r.nopol} (${r.namaSopir}) | ${
@@ -520,7 +528,7 @@ export function NotaVendorTab({
                 )}
               </div>
 
-              {/* Status Toleransi Susut Per Ritase / Nopol */}
+              {/* Harga Claim Susut Default Nota + Status Toleransi Susut Per Ritase */}
               <div
                 className={`rounded-lg border p-3.5 space-y-3 ${
                   totals.adaClaim
@@ -528,9 +536,40 @@ export function NotaVendorTab({
                     : 'border-emerald-800/60 bg-emerald-950/25'
                 }`}
               >
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div>
+                  <label
+                    htmlFor="nota-default-harga-claim"
+                    className="block text-xs font-semibold text-slate-200"
+                  >
+                    Harga Claim Susut per Kg (Default Nota Ini)
+                  </label>
+                  <input
+                    id="nota-default-harga-claim"
+                    type="number"
+                    min={0}
+                    step="100"
+                    value={
+                      currentAdj.tarifClaimPerKg && currentAdj.tarifClaimPerKg !== '0'
+                        ? currentAdj.tarifClaimPerKg
+                        : ''
+                    }
+                    onChange={(e) =>
+                      onUpdateNotaAdjustment(activeAdjKey, {
+                        ...currentAdj,
+                        tarifClaimPerKg: e.target.value,
+                      })
+                    }
+                    placeholder="Masukkan harga barang/Kg (misal: 8000)"
+                    className="mt-1.5 w-full min-h-[38px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 font-mono text-sm text-slate-100 tabular-nums placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                  />
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Otomatis dipakai untuk ritase yang susutnya melewati batas toleransi (bisa juga diisi berbeda per nopol jika muncul di bawah).
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800/70 pt-2.5 text-xs">
                   <span className="font-semibold text-slate-200">
-                    Pengecekan Susut Per Nopol / Ritase (Sesuai Toleransi Ritase)
+                    Pengecekan Susut Per Nopol / Ritase
                   </span>
                   <span
                     className={`font-mono font-semibold ${
@@ -601,8 +640,8 @@ export function NotaVendorTab({
                     ))}
                   </div>
                 ) : (
-                  <div className="border-t border-emerald-800/40 pt-2.5 text-xs font-medium text-emerald-300">
-                    Semua ritase berada dalam batas toleransi susut masing-masing. Tidak ada claim susut (baris &amp; rincian susut tidak ditampilkan di nota).
+                  <div className="text-xs font-medium text-emerald-300">
+                    Semua ritase pada filter ini berada dalam batas toleransi susut. Baris &amp; rincian claim susut tidak ditampilkan di Nota.
                   </div>
                 )}
               </div>
@@ -665,14 +704,31 @@ export function NotaVendorTab({
               {exportingExcel ? 'Menyiapkan Excel...' : 'Cetak / Download Excel (.xlsx)'}
             </button>
 
+            {isElectronDesktop() && (
+              <button
+                type="button"
+                disabled={filteredItems.length === 0}
+                onClick={() =>
+                  savePageAsPdf(
+                    `Nota-Vendor-${(selectedVendor?.name || 'Semua').replace(/\s+/g, '-')}-${getTodayIso()}.pdf`,
+                    onNotify
+                  )
+                }
+                className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-blue-700 bg-blue-950/70 px-4 py-2 text-xs font-semibold text-blue-200 transition-colors hover:bg-blue-900/60 disabled:cursor-not-allowed disabled:opacity-45 whitespace-nowrap"
+              >
+                <FileDown className="h-4 w-4" />
+                Simpan PDF
+              </button>
+            )}
+
             <button
               type="button"
               disabled={filteredItems.length === 0}
-              onClick={() => window.print()}
+              onClick={() => printCurrentPage()}
               className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-45 whitespace-nowrap"
             >
               <Printer className="h-4 w-4" />
-              Cetak / Simpan PDF
+              Cetak / Print
             </button>
           </div>
         </div>
@@ -776,7 +832,7 @@ export function NotaVendorTab({
                         {formatRp(m.jumlahOngkosVendor)}
                       </td>
                       <td className="border border-slate-900 px-2 py-1.5 text-right font-mono tabular-nums whitespace-nowrap">
-                        {formatUangJalanCell(m.uangJalan)}
+                        {formatUangJalanCell(m.uangJalanVendor)}
                       </td>
                     </tr>
                   );

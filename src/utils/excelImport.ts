@@ -5,6 +5,7 @@ import {
   PusatPaymentStatus,
   Ritase,
   SumberUangJalan,
+  UjPusatMode,
   Vendor,
   VendorPaymentStatus,
 } from '../types/transport';
@@ -112,6 +113,7 @@ function findDaftarHeader(rows: Row[]): {
       else if (h.startsWith('berat muat')) found.beratMuat = cIdx;
       else if (h.startsWith('berat bongkar') || h.startsWith('tonase bongkar')) found.beratBongkar = cIdx;
       else if (h.startsWith('tol. susut')) found.toleransiSusut = cIdx;
+      else if (h.startsWith('harga claim')) found.hargaClaim = cIdx;
       else if (h.startsWith('harga pusat')) found.hargaPusat = cIdx;
       else if (h.startsWith('harga vendor')) found.hargaVendor = cIdx;
       else if (h.startsWith('uang jalan')) found.uangJalan = cIdx;
@@ -294,6 +296,10 @@ export async function importDaftarRitaseFromExcel(
         colMap.toleransiSusut !== undefined
           ? parseToleranceCell(row[colMap.toleransiSusut])
           : 0.3;
+      const hargaClaimSusutPerKg =
+        colMap.hargaClaim !== undefined
+          ? Math.max(0, parseNumericCell(row[colMap.hargaClaim]))
+          : 0;
       const hargaPusatPerKg =
         colMap.hargaPusat !== undefined ? Math.max(0, parseNumericCell(row[colMap.hargaPusat])) : 0;
       const hargaJualVendorPerKg =
@@ -310,6 +316,10 @@ export async function importDaftarRitaseFromExcel(
           ? String(row[colMap.sumberUj] ?? '').trim().toLowerCase()
           : '';
       const sumberUangJalan: SumberUangJalan = rawSumberUj.includes('pusat') ? 'Pusat' : 'Broker';
+      const ujPusatMode: UjPusatMode =
+        sumberUangJalan === 'Pusat' && rawSumberUj.includes('hold')
+          ? 'Di Hold Broker'
+          : 'Transfer ke Vendor';
 
       const rawDoc =
         colMap.docStatus !== undefined
@@ -349,8 +359,10 @@ export async function importDaftarRitaseFromExcel(
         hargaJualVendorPerKg,
         uangJalan,
         sumberUangJalan,
+        ujPusatMode,
         biayaKartuGto,
         toleransiSusutPersen,
+        hargaClaimSusutPerKg,
         docStatus,
         vendorPaymentStatus,
         pusatPaymentStatus,

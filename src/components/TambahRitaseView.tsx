@@ -5,6 +5,7 @@ import {
   PusatPaymentStatus,
   Ritase,
   SumberUangJalan,
+  UjPusatMode,
   Vendor,
   VendorPaymentStatus,
 } from '../types/transport';
@@ -51,8 +52,10 @@ interface RitaseFormState {
   hargaJualVendorPerKg: string;
   uangJalan: string;
   sumberUangJalan: SumberUangJalan;
+  ujPusatMode: UjPusatMode;
   biayaKartuGto: string;
   toleransiSusutPersen: string;
+  hargaClaimSusutPerKg: string;
   docStatus: DocStatus;
   vendorPaymentStatus: VendorPaymentStatus;
   pusatPaymentStatus: PusatPaymentStatus;
@@ -80,8 +83,10 @@ function createInitialFormState(defaultVendorId: string): RitaseFormState {
     hargaJualVendorPerKg: '',
     uangJalan: '0',
     sumberUangJalan: 'Broker',
+    ujPusatMode: 'Transfer ke Vendor',
     biayaKartuGto: '',
     toleransiSusutPersen: '0.3',
+    hargaClaimSusutPerKg: '',
     docStatus: 'SJ & Tiket Timbang Belum Balik',
     vendorPaymentStatus: 'Belum Lunas',
     pusatPaymentStatus: 'Belum Dibayar Pusat',
@@ -121,9 +126,18 @@ export function TambahRitaseView({
         uangJalan: String(editingRitase.uangJalan),
         sumberUangJalan:
           editingRitase.sumberUangJalan === 'Pusat' ? 'Pusat' : 'Broker',
+        ujPusatMode:
+          editingRitase.sumberUangJalan === 'Pusat' &&
+          editingRitase.ujPusatMode === 'Di Hold Broker'
+            ? 'Di Hold Broker'
+            : 'Transfer ke Vendor',
         biayaKartuGto:
           (editingRitase.biayaKartuGto || 0) > 0 ? String(editingRitase.biayaKartuGto) : '',
         toleransiSusutPersen: String(parseToleransiValue(editingRitase.toleransiSusutPersen)),
+        hargaClaimSusutPerKg:
+          (editingRitase.hargaClaimSusutPerKg || 0) > 0
+            ? String(editingRitase.hargaClaimSusutPerKg)
+            : '',
         docStatus: editingRitase.docStatus,
         vendorPaymentStatus: editingRitase.vendorPaymentStatus,
         pusatPaymentStatus: editingRitase.pusatPaymentStatus,
@@ -206,6 +220,7 @@ export function TambahRitaseView({
           hargaPusat: exactVendorRoute.hargaPusatPerKg,
           hargaVendor: exactVendorRoute.hargaJualVendorPerKg,
           toleransiSusutPersen: parseToleransiValue(exactVendorRoute.toleransiSusutPersen),
+          hargaClaimSusutPerKg: exactVendorRoute.hargaClaimSusutPerKg || 0,
           label: `Rute & vendor sama (${exactVendorRoute.lokasiMuat} → ${exactVendorRoute.lokasiBongkar})`,
         };
       }
@@ -220,6 +235,7 @@ export function TambahRitaseView({
           hargaPusat: exactRoute.hargaPusatPerKg,
           hargaVendor: exactRoute.hargaJualVendorPerKg,
           toleransiSusutPersen: parseToleransiValue(exactRoute.toleransiSusutPersen),
+          hargaClaimSusutPerKg: exactRoute.hargaClaimSusutPerKg || 0,
           label: `Rute sama (${exactRoute.lokasiMuat} → ${exactRoute.lokasiBongkar})`,
         };
       }
@@ -232,6 +248,7 @@ export function TambahRitaseView({
           hargaPusat: vendorLatest.hargaPusatPerKg,
           hargaVendor: vendorLatest.hargaJualVendorPerKg,
           toleransiSusutPersen: parseToleransiValue(vendorLatest.toleransiSusutPersen),
+          hargaClaimSusutPerKg: vendorLatest.hargaClaimSusutPerKg || 0,
           label: `Tarif terakhir vendor (${vendorLatest.lokasiMuat} → ${vendorLatest.lokasiBongkar})`,
         };
       }
@@ -256,8 +273,10 @@ export function TambahRitaseView({
       hargaJualVendorPerKg: Number(form.hargaJualVendorPerKg) || 0,
       uangJalan: Number(form.uangJalan) || 0,
       sumberUangJalan: form.sumberUangJalan,
+      ujPusatMode: form.sumberUangJalan === 'Pusat' ? form.ujPusatMode : 'Transfer ke Vendor',
       biayaKartuGto: Math.max(0, Number(form.biayaKartuGto) || 0),
       toleransiSusutPersen: parseToleransiValue(form.toleransiSusutPersen),
+      hargaClaimSusutPerKg: Math.max(0, Number(form.hargaClaimSusutPerKg) || 0),
       docStatus: form.docStatus,
       vendorPaymentStatus: form.vendorPaymentStatus,
       pusatPaymentStatus: form.pusatPaymentStatus,
@@ -324,8 +343,10 @@ export function TambahRitaseView({
       hargaJualVendorPerKg: Math.max(0, Number(form.hargaJualVendorPerKg) || 0),
       uangJalan: Math.max(0, Number(form.uangJalan) || 0),
       sumberUangJalan: form.sumberUangJalan,
+      ujPusatMode: form.sumberUangJalan === 'Pusat' ? form.ujPusatMode : 'Transfer ke Vendor',
       biayaKartuGto: Math.max(0, Number(form.biayaKartuGto) || 0),
       toleransiSusutPersen: parseToleransiValue(form.toleransiSusutPersen),
+      hargaClaimSusutPerKg: Math.max(0, Number(form.hargaClaimSusutPerKg) || 0),
       docStatus: form.docStatus,
       vendorPaymentStatus: form.vendorPaymentStatus,
       pusatPaymentStatus: form.pusatPaymentStatus,
@@ -667,6 +688,10 @@ export function TambahRitaseView({
                     hargaPusatPerKg: String(suggestedRate.hargaPusat),
                     hargaJualVendorPerKg: String(suggestedRate.hargaVendor),
                     toleransiSusutPersen: String(suggestedRate.toleransiSusutPersen),
+                    hargaClaimSusutPerKg:
+                      suggestedRate.hargaClaimSusutPerKg > 0
+                        ? String(suggestedRate.hargaClaimSusutPerKg)
+                        : p.hargaClaimSusutPerKg,
                   }))
                 }
                 className="inline-flex min-h-[30px] items-center rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-500 whitespace-nowrap"
@@ -724,9 +749,48 @@ export function TambahRitaseView({
                 </button>
               </div>
             </div>
+
+            {form.sumberUangJalan === 'Pusat' && (
+              <div className="sm:col-span-2 lg:col-span-3 rounded-lg border border-amber-800/60 bg-amber-950/20 p-3.5">
+                <span className="block text-xs font-semibold text-amber-200">
+                  Penyaluran Uang Jalan dari Pusat
+                </span>
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setForm((p) => ({ ...p, ujPusatMode: 'Transfer ke Vendor' }))}
+                    className={`min-h-[44px] rounded-lg border px-3.5 py-2 text-left text-xs font-semibold transition-colors ${
+                      form.ujPusatMode === 'Transfer ke Vendor'
+                        ? 'border-emerald-500 bg-emerald-950/70 text-emerald-200'
+                        : 'border-slate-700 bg-slate-950 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                    }`}
+                  >
+                    <div>Ditransfer ke Vendor</div>
+                    <div className="text-[10px] font-normal opacity-85">
+                      Potong tagihan Pusat &amp; potong Nota/pembayaran Vendor
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setForm((p) => ({ ...p, ujPusatMode: 'Di Hold Broker' }))}
+                    className={`min-h-[44px] rounded-lg border px-3.5 py-2 text-left text-xs font-semibold transition-colors ${
+                      form.ujPusatMode === 'Di Hold Broker'
+                        ? 'border-amber-500 bg-amber-950/80 text-amber-200'
+                        : 'border-slate-700 bg-slate-950 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                    }`}
+                  >
+                    <div>Di Hold Broker</div>
+                    <div className="text-[10px] font-normal opacity-85">
+                      Potong tagihan Pusat saja, TIDAK potong pembayaran Vendor
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
-          <div className="sm:col-span-2 lg:col-span-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2 lg:col-span-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
               <label htmlFor="rit-gto" className="block text-xs font-semibold text-slate-300">
                 Biaya Kartu GTO (Rp){' '}
@@ -739,11 +803,11 @@ export function TambahRitaseView({
                 step="1000"
                 value={form.biayaKartuGto}
                 onChange={(e) => setForm((p) => ({ ...p, biayaKartuGto: e.target.value }))}
-                placeholder="0 (kosongkan jika tidak pakai GTO)"
+                placeholder="0 (kosongkan jika tidak pakai)"
                 className="mt-1.5 w-full min-h-[42px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 tabular-nums placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
               />
               <p className="mt-1 text-[11px] text-slate-400">
-                Jika diisi &gt; 0, otomatis ditagihkan ke vendor dan muncul di Nota. Jika 0, baris GTO dihilangkan dari Nota.
+                Jika &gt; 0, otomatis ditagihkan ke vendor di Nota.
               </p>
             </div>
 
@@ -764,7 +828,27 @@ export function TambahRitaseView({
                 className="mt-1.5 w-full min-h-[42px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 tabular-nums placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
               />
               <p className="mt-1 text-[11px] text-slate-400">
-                Sesuaikan aturan pabrik tujuan (contoh: 0,2 / 0,3 / 0,5). Isi 0 jika tanpa toleransi.
+                Aturan pabrik tujuan (0,2 / 0,3 / 0,5). Isi 0 jika tanpa toleransi.
+              </p>
+            </div>
+
+            <div>
+              <label htmlFor="rit-harga-claim" className="block text-xs font-semibold text-slate-300">
+                Harga Claim Susut / Kg (Rp){' '}
+                <span className="text-[11px] font-normal text-slate-400">(Opsional)</span>
+              </label>
+              <input
+                id="rit-harga-claim"
+                type="number"
+                min={0}
+                step="100"
+                value={form.hargaClaimSusutPerKg}
+                onChange={(e) => setForm((p) => ({ ...p, hargaClaimSusutPerKg: e.target.value }))}
+                placeholder="Contoh: 8000"
+                className="mt-1.5 w-full min-h-[42px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 tabular-nums placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              />
+              <p className="mt-1 text-[11px] text-slate-400">
+                Harga barang/Kg bila susut melewati toleransi (otomatis terisi di Nota).
               </p>
             </div>
           </div>
@@ -848,6 +932,13 @@ export function TambahRitaseView({
                 ? formatRp(liveMetrics.jumlahOngkosVendor)
                 : 'Menunggu Bongkar'}
             </div>
+            {form.sumberUangJalan === 'Pusat' &&
+              form.ujPusatMode === 'Di Hold Broker' &&
+              liveMetrics.uangJalan > 0 && (
+                <div className="text-[10px] text-amber-300 font-mono">
+                  UJ {formatRp(liveMetrics.uangJalan)} Di Hold Broker (tidak potong vendor)
+                </div>
+              )}
             {liveMetrics.biayaKartuGto > 0 && (
               <div className="text-[10px] text-amber-300 font-mono">
                 Pot. GTO: {formatRp(liveMetrics.biayaKartuGto)}

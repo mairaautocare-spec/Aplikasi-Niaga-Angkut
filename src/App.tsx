@@ -442,7 +442,21 @@ export default function App() {
             <span>Cetak Nota Vendor</span>
           </button>
 
-          {/* 5. Master Data Vendor */}
+          {/* 5. Cetak Tagihan ke Pusat */}
+          <button
+            type="button"
+            onClick={() => navigateTo('dashboard', 'tagihan-pusat')}
+            className={`flex w-full min-h-[42px] items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-semibold transition-colors ${
+              activeMenu === 'dashboard' && dashboardSubMenu === 'tagihan-pusat'
+                ? 'bg-blue-600 text-white'
+                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+            }`}
+          >
+            <Printer className="h-4 w-4 shrink-0" />
+            <span>Cetak Tagihan Pusat</span>
+          </button>
+
+          {/* 6. Master Data Vendor */}
           <button
             type="button"
             onClick={() => navigateTo('vendor')}
@@ -515,7 +529,7 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
+    <div className="app-shell-root min-h-screen bg-slate-950 text-slate-100">
       <input
         ref={fileInputRef}
         type="file"

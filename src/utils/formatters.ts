@@ -1,9 +1,11 @@
-import { Ritase, RitaseMetrics, SumberUangJalan, TimbanganStatus } from '../types/transport';
+import { Ritase, RitaseMetrics, SumberUangJalan, TimbanganStatus, UjPusatMode } from '../types/transport';
 
 /**
  * Hitung seluruh metrik keuangan & susut ritase secara konsisten.
  * - Selama beratBongkarKg === 0 (belum selesai bongkar), susut & tagihan bernilai 0 agar tidak muncul susut/claim palsu.
  * - Jika sumberUangJalan === 'Pusat', tagihan bersih ke Pusat otomatis dikurangi UJ yang sudah dibayar Pusat.
+ *   - Jika ujPusatMode === 'Transfer ke Vendor', UJ juga memotong kewajiban ke Vendor.
+ *   - Jika ujPusatMode === 'Di Hold Broker', UJ tidak memotong kewajiban/nota Vendor.
  * - Jika sumberUangJalan === 'Broker', tagihan ke Pusat utuh dan UJ memotong kewajiban ke Vendor.
  */
 export function computeRitaseMetrics(r: Ritase): RitaseMetrics {
@@ -23,6 +25,10 @@ export function computeRitaseMetrics(r: Ritase): RitaseMetrics {
       : 0.3;
   const sumberUangJalan: SumberUangJalan =
     r.sumberUangJalan === 'Pusat' ? 'Pusat' : 'Broker';
+  const ujPusatMode: UjPusatMode =
+    sumberUangJalan === 'Pusat' && r.ujPusatMode === 'Di Hold Broker'
+      ? 'Di Hold Broker'
+      : 'Transfer ke Vendor';
 
   const isSelesaiBongkar = beratBongkar > 0;
   const timbanganStatus: TimbanganStatus = isSelesaiBongkar
@@ -46,6 +52,9 @@ export function computeRitaseMetrics(r: Ritase): RitaseMetrics {
 
   const uangJalanBroker = sumberUangJalan === 'Broker' ? uangJalan : 0;
   const uangJalanPusat = sumberUangJalan === 'Pusat' ? uangJalan : 0;
+  const isHoldBroker = sumberUangJalan === 'Pusat' && ujPusatMode === 'Di Hold Broker';
+  const uangJalanVendor = isHoldBroker ? 0 : uangJalan;
+  const uangJalanHoldBroker = isHoldBroker ? uangJalan : 0;
 
   // Keuntungan tetap selisih bruto Pusat dikurangi ongkos Vendor
   const keuntungan = isSelesaiBongkar ? tagihanBrutoPusat - jumlahOngkosVendor : 0;
@@ -53,12 +62,13 @@ export function computeRitaseMetrics(r: Ritase): RitaseMetrics {
   const sisaKewajibanVendor =
     !isSelesaiBongkar || r.vendorPaymentStatus === 'Lunas'
       ? 0
-      : jumlahOngkosVendor - uangJalan - biayaKartuGto;
+      : jumlahOngkosVendor - uangJalanVendor - biayaKartuGto;
 
   return {
     timbanganStatus,
     isSelesaiBongkar,
     sumberUangJalan,
+    ujPusatMode,
     biayaKartuGto,
     toleransiSusutPersen,
     susutKg,
@@ -69,6 +79,8 @@ export function computeRitaseMetrics(r: Ritase): RitaseMetrics {
     uangJalan,
     uangJalanBroker,
     uangJalanPusat,
+    uangJalanVendor,
+    uangJalanHoldBroker,
     keuntungan,
     sisaKewajibanVendor,
   };

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -31,16 +31,51 @@ function resolveStartTarget() {
   return { type: 'file', value: fallbackDistPath };
 }
 
+async function saveCurrentPageAsPdf(win, defaultFileName) {
+  if (!win) return { canceled: true };
+  const safeName = (defaultFileName || 'NiagaAngkut-Dokumen.pdf').replace(/[<>:"/\\|?*]+/g, '-');
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    title: 'Simpan Dokumen PDF',
+    defaultPath: path.join(app.getPath('documents'), safeName),
+    filters: [{ name: 'Dokumen PDF', extensions: ['pdf'] }],
+  });
+
+  if (canceled || !filePath) {
+    return { canceled: true };
+  }
+
+  const pdfBuffer = await win.webContents.printToPDF({
+    landscape: true,
+    pageSize: 'A4',
+    printBackground: true,
+    preferCSSPageSize: true,
+  });
+
+  fs.writeFileSync(filePath, pdfBuffer);
+  return { canceled: false, filePath };
+}
+
 function createApplicationMenu() {
   const template = [
     {
       label: 'Aplikasi',
       submenu: [
         {
-          label: 'Cetak / Simpan PDF',
+          label: 'Cetak / Print...',
           accelerator: 'CmdOrCtrl+P',
           click: () => {
-            if (mainWindow) mainWindow.webContents.print();
+            if (mainWindow) {
+              mainWindow.webContents.print({ silent: false, printBackground: true });
+            }
+          },
+        },
+        {
+          label: 'Simpan Sebagai PDF...',
+          accelerator: 'CmdOrCtrl+Shift+P',
+          click: () => {
+            if (mainWindow) {
+              saveCurrentPageAsPdf(mainWindow, 'NiagaAngkut-Dokumen.pdf').catch(() => {});
+            }
           },
         },
         {
@@ -83,9 +118,32 @@ function createApplicationMenu() {
   Menu.setApplicationMenu(menu);
 }
 
+ipcMain.handle('niaga:print-page', async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  if (!win) return { success: false, reason: 'No active window' };
+
+  return new Promise((resolve) => {
+    win.webContents.print(
+      {
+        silent: false,
+        printBackground: true,
+      },
+      (success, failureReason) => {
+        resolve({ success, reason: failureReason || '' });
+      }
+    );
+  });
+});
+
+ipcMain.handle('niaga:save-pdf', async (event, defaultFileName) => {
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  return saveCurrentPageAsPdf(win, defaultFileName);
+});
+
 function createWindow() {
   const iconPath = path.join(__dirname, 'build', 'icon.png');
   const hasIcon = fs.existsSync(iconPath);
+  const preloadPath = path.join(__dirname, 'preload.cjs');
 
   mainWindow = new BrowserWindow({
     width: 1366,
@@ -99,6 +157,7 @@ function createWindow() {
     autoHideMenuBar: true,
     ...(hasIcon ? { icon: iconPath } : {}),
     webPreferences: {
+      preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

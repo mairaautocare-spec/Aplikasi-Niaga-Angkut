@@ -15,6 +15,8 @@ export type PusatPaymentStatus = 'Belum Dibayar Pusat' | 'Sudah Dibayar Pusat';
 
 export type SumberUangJalan = 'Broker' | 'Pusat';
 
+export type UjPusatMode = 'Transfer ke Vendor' | 'Di Hold Broker';
+
 export type TimbanganStatus = 'Menunggu Muat' | 'Dalam Perjalanan' | 'Selesai Bongkar';
 
 export interface Vendor {
@@ -41,8 +43,10 @@ export interface Ritase {
   hargaJualVendorPerKg: number; // Harga jual ke vendor / OA vendor (lebih murah)
   uangJalan: number; // Uang Jalan / DP awal (Rp)
   sumberUangJalan?: SumberUangJalan; // 'Broker' (default) atau 'Pusat'
+  ujPusatMode?: UjPusatMode; // Jika UJ dari Pusat: 'Transfer ke Vendor' (default) atau 'Di Hold Broker'
   biayaKartuGto?: number; // Potongan registrasi / isi kartu GTO yang ditagihkan ke vendor (Rp)
   toleransiSusutPersen?: number; // Batas toleransi susut pabrik (%) - default 0.3
+  hargaClaimSusutPerKg?: number; // Harga barang per Kg untuk claim susut bila melebihi toleransi (Rp)
   docStatus: DocStatus;
   vendorPaymentStatus: VendorPaymentStatus;
   pusatPaymentStatus: PusatPaymentStatus;
@@ -67,6 +71,7 @@ export interface RitaseMetrics {
   timbanganStatus: TimbanganStatus;
   isSelesaiBongkar: boolean;
   sumberUangJalan: SumberUangJalan;
+  ujPusatMode: UjPusatMode;
   biayaKartuGto: number;
   toleransiSusutPersen: number;
   susutKg: number;
@@ -77,6 +82,8 @@ export interface RitaseMetrics {
   uangJalan: number;
   uangJalanBroker: number;
   uangJalanPusat: number;
+  uangJalanVendor: number; // UJ yang benar-benar memotong tagihan/nota Vendor (0 jika UJ Pusat Di Hold Broker)
+  uangJalanHoldBroker: number; // UJ dari Pusat yang ditahan Broker (tidak memotong Vendor)
   keuntungan: number; // Tagihan Bruto Pusat - Ongkos Vendor (0 jika belum bongkar)
-  sisaKewajibanVendor: number; // Ongkos Vendor - Uang Jalan - Biaya GTO (0 jika Lunas atau belum bongkar)
+  sisaKewajibanVendor: number; // Ongkos Vendor - Uang Jalan Vendor - Biaya GTO (0 jika Lunas atau belum bongkar)
 }

@@ -44,8 +44,13 @@ function migrateLegacyRitase(raw: Record<string, unknown>): Ritase {
     hargaJualVendorPerKg: hargaVendor,
     uangJalan,
     sumberUangJalan: raw.sumberUangJalan === 'Pusat' ? 'Pusat' : 'Broker',
+    ujPusatMode:
+      raw.sumberUangJalan === 'Pusat' && raw.ujPusatMode === 'Di Hold Broker'
+        ? 'Di Hold Broker'
+        : 'Transfer ke Vendor',
     biayaKartuGto: Math.max(0, Number(raw.biayaKartuGto) || 0),
     toleransiSusutPersen,
+    hargaClaimSusutPerKg: Math.max(0, Number(raw.hargaClaimSusutPerKg) || 0),
     docStatus:
       raw.docStatus === 'SJ & Tiket Timbang Lengkap'
         ? 'SJ & Tiket Timbang Lengkap'

@@ -3,6 +3,7 @@ import {
   AlertCircle,
   ArrowRight,
   ArrowUpRight,
+  BarChart3,
   Building2,
   Check,
   CheckCircle2,
@@ -15,7 +16,8 @@ import {
   TrendingUp,
   Wallet,
 } from 'lucide-react';
-import { DashboardSubMenu, Ritase, Vendor } from '../types/transport';
+import { DashboardSubMenu, NotaAdjustment, Ritase, Vendor } from '../types/transport';
+import { DashboardAnalitikView } from './DashboardAnalitikView';
 import { exportTagihanPusatExcel } from '../utils/excelExport';
 import {
   computeRitaseMetrics,
@@ -31,10 +33,12 @@ import { isElectronDesktop, printCurrentPage, savePageAsPdf } from '../utils/pri
 interface DashboardTabProps {
   vendors: Vendor[];
   ritase: Ritase[];
+  notaAdjustments: Record<string, NotaAdjustment>;
   subMenu: DashboardSubMenu;
   onChangeSubMenu: (sub: DashboardSubMenu) => void;
   onGoToVendorNota: (vendorId: string) => void;
   onGoToUnreturnedSj: () => void;
+  onGoToTambahRitase: () => void;
   onMarkMultiplePusatPaid: (ids: string[]) => void;
   onTogglePusatPaymentStatus: (id: string) => void;
   onNotify: (message: string) => void;
@@ -43,10 +47,12 @@ interface DashboardTabProps {
 export function DashboardTab({
   vendors,
   ritase,
+  notaAdjustments,
   subMenu,
   onChangeSubMenu,
   onGoToVendorNota,
   onGoToUnreturnedSj,
+  onGoToTambahRitase,
   onMarkMultiplePusatPaid,
   onTogglePusatPaymentStatus,
   onNotify,
@@ -347,6 +353,8 @@ export function DashboardTab({
   const subMenuTitle =
     subMenu === 'ringkasan'
       ? 'Dashboard & Profit'
+      : subMenu === 'analitik'
+      ? 'Dashboard · Grafik & Analitik'
       : subMenu === 'per-vendor'
       ? 'Dashboard · Detail Per Vendor'
       : 'Dashboard · Tagihan ke Pusat';
@@ -360,29 +368,53 @@ export function DashboardTab({
             {subMenuTitle}
           </h1>
           <p className="mt-1 text-sm text-slate-400">
-            Keuntungan dihitung dari sisa Harga Pusat dikurangi Harga Jual ke Vendor.
+            {subMenu === 'analitik'
+              ? 'Analisis grafik mingguan, bulanan, dan tahunan untuk profit, ritase, tonase, claim susut, dan arus uang jalan.'
+              : 'Keuntungan dihitung dari sisa Harga Pusat dikurangi Harga Jual ke Vendor.'}
           </p>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
-          <label htmlFor="dashboard-month-filter" className="text-xs font-medium text-slate-400 whitespace-nowrap">
-            Periode:
-          </label>
-          <select
-            id="dashboard-month-filter"
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            className="min-h-[40px] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-          >
-            <option value="all">Semua Waktu ({ritase.length} ritase)</option>
-            {availableMonths.map((m) => (
-              <option key={m} value={m}>
-                {formatBulanLabel(m)}
-              </option>
-            ))}
-          </select>
-        </div>
+        {subMenu !== 'analitik' && (
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            {subMenu === 'ringkasan' && (
+              <button
+                type="button"
+                onClick={() => onChangeSubMenu('analitik')}
+                className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800 whitespace-nowrap"
+              >
+                <BarChart3 className="h-3.5 w-3.5 text-blue-400" />
+                Grafik &amp; Analitik
+              </button>
+            )}
+            <label htmlFor="dashboard-month-filter" className="text-xs font-medium text-slate-400 whitespace-nowrap">
+              Periode:
+            </label>
+            <select
+              id="dashboard-month-filter"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="min-h-[40px] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              <option value="all">Semua Waktu ({ritase.length} ritase)</option>
+              {availableMonths.map((m) => (
+                <option key={m} value={m}>
+                  {formatBulanLabel(m)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
+
+      {/* SUB-MENU ANALITIK & GRAFIK */}
+      {subMenu === 'analitik' && (
+        <DashboardAnalitikView
+          vendors={vendors}
+          ritase={ritase}
+          notaAdjustments={notaAdjustments}
+          onGoToTambahRitase={onGoToTambahRitase}
+        />
+      )}
 
       {/* 4 Kartu Ringkasan Utama — Hanya tampil di Dashboard Utama (ringkasan) */}
       {subMenu === 'ringkasan' && (
@@ -684,13 +716,22 @@ export function DashboardTab({
                                 {m.isSelesaiBongkar ? formatRp(m.jumlahOngkosVendor) : '-'}
                               </td>
                               <td className="px-3 py-3 text-right font-mono text-slate-300 tabular-nums">
-                                {formatRp(m.uangJalan)} ({m.sumberUangJalan}
-                                {m.sumberUangJalan === 'Pusat'
-                                  ? m.ujPusatMode === 'Di Hold Broker'
-                                    ? ' · Hold Broker'
-                                    : ' · Tf Vendor'
-                                  : ''}
-                                )
+                                <div>
+                                  {formatRp(m.uangJalan)} ({m.sumberUangJalan}
+                                  {m.sumberUangJalan === 'Pusat'
+                                    ? m.uangJalanHoldBroker > 0
+                                      ? m.uangJalanVendor > 0
+                                        ? ' · Sebagian Hold'
+                                        : ' · Hold Broker'
+                                      : ' · Tf Vendor'
+                                    : ''}
+                                  )
+                                </div>
+                                {m.uangJalanHoldBroker > 0 && (
+                                  <div className="text-[10px] text-amber-300">
+                                    Tf {formatRp(m.uangJalanVendor)} · Hold {formatRp(m.uangJalanHoldBroker)}
+                                  </div>
+                                )}
                               </td>
                               <td className="px-4 py-3 text-right font-semibold">
                                 <span

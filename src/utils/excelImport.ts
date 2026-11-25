@@ -118,6 +118,7 @@ function findDaftarHeader(rows: Row[]): {
       else if (h.startsWith('harga vendor')) found.hargaVendor = cIdx;
       else if (h.startsWith('uang jalan')) found.uangJalan = cIdx;
       else if (h === 'sumber uj') found.sumberUj = cIdx;
+      else if (h.startsWith('uj hold')) found.ujHold = cIdx;
       else if (h.startsWith('kartu gto')) found.kartuGto = cIdx;
       else if (h.startsWith('status dokumen')) found.docStatus = cIdx;
       else if (h.startsWith('status bayar vendor')) found.vendorPayStatus = cIdx;
@@ -316,8 +317,20 @@ export async function importDaftarRitaseFromExcel(
           ? String(row[colMap.sumberUj] ?? '').trim().toLowerCase()
           : '';
       const sumberUangJalan: SumberUangJalan = rawSumberUj.includes('pusat') ? 'Pusat' : 'Broker';
+      const parsedHoldFromCol =
+        colMap.ujHold !== undefined
+          ? Math.min(uangJalan, Math.max(0, parseNumericCell(row[colMap.ujHold])))
+          : null;
+      const uangJalanHoldBroker =
+        sumberUangJalan === 'Pusat'
+          ? parsedHoldFromCol !== null
+            ? parsedHoldFromCol
+            : rawSumberUj.includes('hold')
+            ? uangJalan
+            : 0
+          : 0;
       const ujPusatMode: UjPusatMode =
-        sumberUangJalan === 'Pusat' && rawSumberUj.includes('hold')
+        sumberUangJalan === 'Pusat' && uangJalanHoldBroker > 0
           ? 'Di Hold Broker'
           : 'Transfer ke Vendor';
 
@@ -360,6 +373,7 @@ export async function importDaftarRitaseFromExcel(
         uangJalan,
         sumberUangJalan,
         ujPusatMode,
+        uangJalanHoldBroker,
         biayaKartuGto,
         toleransiSusutPersen,
         hargaClaimSusutPerKg,

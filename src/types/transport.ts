@@ -5,7 +5,7 @@ export type MainMenuId =
   | 'nota'
   | 'vendor';
 
-export type DashboardSubMenu = 'ringkasan' | 'per-vendor' | 'tagihan-pusat';
+export type DashboardSubMenu = 'ringkasan' | 'analitik' | 'per-vendor' | 'tagihan-pusat';
 
 export type DocStatus = 'SJ & Tiket Timbang Belum Balik' | 'SJ & Tiket Timbang Lengkap';
 
@@ -44,6 +44,7 @@ export interface Ritase {
   uangJalan: number; // Uang Jalan / DP awal (Rp)
   sumberUangJalan?: SumberUangJalan; // 'Broker' (default) atau 'Pusat'
   ujPusatMode?: UjPusatMode; // Jika UJ dari Pusat: 'Transfer ke Vendor' (default) atau 'Di Hold Broker'
+  uangJalanHoldBroker?: number; // Nominal UJ dari Pusat yang ditahan Broker (Rp, 0..uangJalan)
   biayaKartuGto?: number; // Potongan registrasi / isi kartu GTO yang ditagihkan ke vendor (Rp)
   toleransiSusutPersen?: number; // Batas toleransi susut pabrik (%) - default 0.3
   hargaClaimSusutPerKg?: number; // Harga barang per Kg untuk claim susut bila melebihi toleransi (Rp)

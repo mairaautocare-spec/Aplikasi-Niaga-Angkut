@@ -524,7 +524,7 @@ export async function exportDaftarRitaseExcel(
   items: Ritase[],
   vendorMap: Map<string, Vendor>
 ): Promise<string> {
-  const totalCols = 26;
+  const totalCols = 27;
   const columns: SheetOptionsColumn[] = [
     { width: 6 },
     { width: 13 },
@@ -546,7 +546,8 @@ export async function exportDaftarRitaseExcel(
     { width: 18 },
     { width: 20 },
     { width: 18 },
-    { width: 14 },
+    { width: 24 },
+    { width: 18 },
     { width: 18 },
     { width: 20 },
     { width: 26 },
@@ -599,6 +600,7 @@ export async function exportDaftarRitaseExcel(
       { value: 'Ongkos Vendor (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Uang Jalan (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Sumber UJ', type: String, align: 'center', ...HEADER_CELL_BASE },
+      { value: 'UJ Hold Broker (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Kartu GTO (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Keuntungan (Rp)', type: String, align: 'right', ...HEADER_CELL_BASE },
       { value: 'Status Dokumen SJ', type: String, align: 'left', ...HEADER_CELL_BASE },
@@ -613,6 +615,7 @@ export async function exportDaftarRitaseExcel(
   let totalTagihanPusat = 0;
   let totalOngkosVendor = 0;
   let totalUangJalan = 0;
+  let totalUjHoldBroker = 0;
   let totalGto = 0;
   let totalKeuntungan = 0;
 
@@ -624,6 +627,7 @@ export async function exportDaftarRitaseExcel(
     totalTagihanPusat += m.tagihanPusat;
     totalOngkosVendor += m.jumlahOngkosVendor;
     totalUangJalan += m.uangJalan;
+    totalUjHoldBroker += m.uangJalanHoldBroker;
     totalGto += m.biayaKartuGto;
     totalKeuntungan += m.keuntungan;
 
@@ -651,14 +655,17 @@ export async function exportDaftarRitaseExcel(
       {
         value:
           m.sumberUangJalan === 'Pusat'
-            ? m.ujPusatMode === 'Di Hold Broker'
-              ? 'Pusat (Hold Broker)'
+            ? m.uangJalanHoldBroker > 0
+              ? m.uangJalanVendor > 0
+                ? 'Pusat (Sebagian Hold)'
+                : 'Pusat (Hold Broker)'
               : 'Pusat (Transfer Vendor)'
             : 'Broker',
         type: String,
         align: 'center',
         ...DATA_CELL_BASE,
       },
+      { value: m.uangJalanHoldBroker, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
       { value: m.biayaKartuGto, type: Number, format: FORMAT_RP, align: 'right', ...DATA_CELL_BASE },
       { value: m.keuntungan, type: Number, format: FORMAT_RP, align: 'right', fontWeight: 'bold', ...DATA_CELL_BASE },
       { value: r.docStatus, type: String, align: 'left', ...DATA_CELL_BASE },
@@ -681,6 +688,7 @@ export async function exportDaftarRitaseExcel(
     { value: totalOngkosVendor, type: Number, format: FORMAT_RP, align: 'right', ...HIGHLIGHT_CELL_BASE },
     { value: totalUangJalan, type: Number, format: FORMAT_RP, align: 'right', ...HIGHLIGHT_CELL_BASE },
     { value: '', type: String, ...HIGHLIGHT_CELL_BASE },
+    { value: totalUjHoldBroker, type: Number, format: FORMAT_RP, align: 'right', ...HIGHLIGHT_CELL_BASE },
     { value: totalGto, type: Number, format: FORMAT_RP, align: 'right', ...HIGHLIGHT_CELL_BASE },
     { value: totalKeuntungan, type: Number, format: FORMAT_RP, align: 'right', ...HIGHLIGHT_CELL_BASE },
     { value: '', type: String, ...HIGHLIGHT_CELL_BASE },

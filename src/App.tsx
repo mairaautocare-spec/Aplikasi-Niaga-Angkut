@@ -371,6 +371,17 @@ export default function App() {
               </button>
               <button
                 type="button"
+                onClick={() => navigateTo('dashboard', 'analitik')}
+                className={`flex w-full min-h-[34px] items-center rounded-md px-2.5 py-1.5 text-left text-xs font-medium transition-colors ${
+                  activeMenu === 'dashboard' && dashboardSubMenu === 'analitik'
+                    ? 'bg-slate-800 text-blue-400 font-semibold'
+                    : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+                }`}
+              >
+                Grafik &amp; Analitik
+              </button>
+              <button
+                type="button"
                 onClick={() => navigateTo('dashboard', 'per-vendor')}
                 className={`flex w-full min-h-[34px] items-center rounded-md px-2.5 py-1.5 text-left text-xs font-medium transition-colors ${
                   activeMenu === 'dashboard' && dashboardSubMenu === 'per-vendor'
@@ -623,6 +634,7 @@ export default function App() {
               <DashboardTab
                 vendors={db.vendors}
                 ritase={db.ritase}
+                notaAdjustments={db.notaAdjustments || {}}
                 subMenu={dashboardSubMenu}
                 onChangeSubMenu={(sub) => setDashboardSubMenu(sub)}
                 onGoToVendorNota={(vId) => {
@@ -632,6 +644,10 @@ export default function App() {
                 onGoToUnreturnedSj={() => {
                   setRitaseSjFilter('belum');
                   navigateTo('daftar-ritase');
+                }}
+                onGoToTambahRitase={() => {
+                  setEditingRitase(null);
+                  navigateTo('tambah-ritase');
                 }}
                 onMarkMultiplePusatPaid={markMultiplePusatPaid}
                 onTogglePusatPaymentStatus={togglePusatPaymentStatus}

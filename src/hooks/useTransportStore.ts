@@ -45,9 +45,20 @@ function migrateLegacyRitase(raw: Record<string, unknown>): Ritase {
     uangJalan,
     sumberUangJalan: raw.sumberUangJalan === 'Pusat' ? 'Pusat' : 'Broker',
     ujPusatMode:
-      raw.sumberUangJalan === 'Pusat' && raw.ujPusatMode === 'Di Hold Broker'
+      raw.sumberUangJalan === 'Pusat' &&
+      (raw.ujPusatMode === 'Di Hold Broker' || Number(raw.uangJalanHoldBroker || 0) > 0)
         ? 'Di Hold Broker'
         : 'Transfer ke Vendor',
+    uangJalanHoldBroker:
+      raw.sumberUangJalan === 'Pusat'
+        ? raw.uangJalanHoldBroker !== undefined &&
+          raw.uangJalanHoldBroker !== null &&
+          !Number.isNaN(Number(raw.uangJalanHoldBroker))
+          ? Math.min(uangJalan, Math.max(0, Number(raw.uangJalanHoldBroker)))
+          : raw.ujPusatMode === 'Di Hold Broker'
+          ? uangJalan
+          : 0
+        : 0,
     biayaKartuGto: Math.max(0, Number(raw.biayaKartuGto) || 0),
     toleransiSusutPersen,
     hargaClaimSusutPerKg: Math.max(0, Number(raw.hargaClaimSusutPerKg) || 0),

@@ -140,6 +140,33 @@ ipcMain.handle('niaga:save-pdf', async (event, defaultFileName) => {
   return saveCurrentPageAsPdf(win, defaultFileName);
 });
 
+ipcMain.handle('niaga:save-file', async (event, payload) => {
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  if (!win) return { canceled: true };
+
+  const rawName = (payload && payload.defaultFileName) || 'backup-niagaangkut.json';
+  const safeName = String(rawName).replace(/[<>:"/\\|?*]+/g, '-');
+  const content = String((payload && payload.content) || '');
+  const filterName = (payload && payload.filterName) || 'File Backup JSON';
+  const extensions =
+    Array.isArray(payload && payload.extensions) && payload.extensions.length > 0
+      ? payload.extensions
+      : ['json'];
+
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    title: 'Simpan File Backup Data',
+    defaultPath: path.join(app.getPath('downloads'), safeName),
+    filters: [{ name: filterName, extensions }],
+  });
+
+  if (canceled || !filePath) {
+    return { canceled: true };
+  }
+
+  fs.writeFileSync(filePath, content, 'utf8');
+  return { canceled: false, filePath };
+});
+
 function createWindow() {
   const iconPath = path.join(__dirname, 'build', 'icon.png');
   const hasIcon = fs.existsSync(iconPath);

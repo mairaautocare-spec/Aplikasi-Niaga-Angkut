@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 import {
   Building2,
   Check,
@@ -8,6 +9,7 @@ import {
   Copy,
   Download,
   Eraser,
+  FileCode2,
   FileSpreadsheet,
   LayoutDashboard,
   MoreVertical,
@@ -33,6 +35,7 @@ import {
 } from './types/transport';
 import { importDaftarRitaseFromExcel } from './utils/excelImport';
 import { getTodayIso } from './utils/formatters';
+import { isElectronDesktop, saveTextFileDesktop } from './utils/printHelper';
 
 export default function App() {
   const {
@@ -66,6 +69,12 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
   const [backupModalOpen, setBackupModalOpen] = useState(false);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupFeedback, setBackupFeedback] = useState<{
+    type: 'success' | 'error' | 'info';
+    text: string;
+  } | null>(null);
+  const [showRawBackupText, setShowRawBackupText] = useState(false);
   const [copiedBackup, setCopiedBackup] = useState(false);
   const [restoreModalOpen, setRestoreModalOpen] = useState(false);
   const [restoreText, setRestoreText] = useState('');
@@ -73,6 +82,7 @@ export default function App() {
   const [importingExcel, setImportingExcel] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
+  const rawBackupTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -120,121 +130,322 @@ export default function App() {
     return `backup-niagaangkut-${getTodayIso()}-${hh}${mm}.json`;
   };
 
+  const openBackupModal = () => {
+    setBackupFeedback(null);
+    setShowRawBackupText(false);
+    setCopiedBackup(false);
+    setBackupModalOpen(true);
+  };
+
+  const triggerBrowserBlobDownload = (jsonString: string, fileName: string) => {
+    const blob = new Blob([jsonString], {
+      type: 'application/json;charset=utf-8;',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.style.display = 'none';
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+      if (link.parentNode) {
+        link.parentNode.removeChild(link);
+      }
+    }, 10000);
+  };
+
+  const copyTextWithFallback = async (text: string): Promise<boolean> => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        // Fallback to textarea execCommand below
+      }
+    }
+
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      textarea.style.top = '0';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, text.length);
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      return ok;
+    } catch {
+      return false;
+    }
+  };
+
+  const shareNativeAndroidBackup = async (
+    jsonString: string,
+    fileName: string
+  ): Promise<'shared' | 'canceled' | 'failed'> => {
+    try {
+      const writeResult = await Filesystem.writeFile({
+        path: fileName,
+        data: jsonString,
+        directory: Directory.Cache,
+        encoding: Encoding.UTF8,
+      });
+
+      let fileUri = writeResult.uri;
+      if (!fileUri) {
+        const uriRes = await Filesystem.getUri({
+          directory: Directory.Cache,
+          path: fileName,
+        });
+        fileUri = uriRes.uri;
+      }
+
+      await Share.share({
+        title: fileName,
+        files: [fileUri],
+        dialogTitle: 'Simpan / Bagikan File Backup JSON',
+      });
+      return 'shared';
+    } catch (err) {
+      const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+      if (msg.includes('cancel') || msg.includes('abort')) {
+        return 'canceled';
+      }
+
+      try {
+        await Share.share({
+          title: fileName,
+          text: jsonString,
+          dialogTitle: 'Bagikan Kode Backup JSON',
+        });
+        return 'shared';
+      } catch (err2) {
+        const msg2 = err2 instanceof Error ? err2.message.toLowerCase() : String(err2).toLowerCase();
+        if (msg2.includes('cancel') || msg2.includes('abort')) {
+          return 'canceled';
+        }
+        return 'failed';
+      }
+    }
+  };
+
   const handleShareBackupFile = async (
     providedJson?: string,
     providedFileName?: string
   ) => {
     const jsonString = providedJson ?? buildBackupJsonString();
     const fileName = providedFileName ?? makeBackupFileName();
-    const blob = new Blob([jsonString], {
-      type: 'application/json;charset=utf-8;',
-    });
+    setBackupBusy(true);
 
-    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-      const jsonFile = new File([blob], fileName, { type: 'application/json' });
-      const txtFile = new File([blob], fileName, { type: 'text/plain' });
-
-      try {
-        if (!navigator.canShare || navigator.canShare({ files: [jsonFile] })) {
-          await navigator.share({ files: [jsonFile], title: fileName });
-          showToast('Silakan pilih WhatsApp / Drive / File untuk menyimpan backup.');
-          return;
+    try {
+      if (Capacitor.isNativePlatform()) {
+        const res = await shareNativeAndroidBackup(jsonString, fileName);
+        if (res === 'shared') {
+          const msg =
+            'Menu Bagikan Android terbuka. Pilih "Simpan ke File / Drive / WhatsApp" untuk menyimpan file .json.';
+          setBackupFeedback({ type: 'info', text: msg });
+          showToast(msg);
+        } else if (res === 'canceled') {
+          setBackupFeedback({
+            type: 'info',
+            text: 'Proses bagikan dibatalkan. Anda masih bisa menyalin kode JSON di bawah.',
+          });
+        } else {
+          setShowRawBackupText(true);
+          const msg =
+            'Tidak bisa membuka menu Bagikan di perangkat ini. Gunakan tombol "Salin Kode Backup" di bawah.';
+          setBackupFeedback({ type: 'error', text: msg });
+          showToast(msg);
         }
-        if (navigator.canShare({ files: [txtFile] })) {
-          await navigator.share({ files: [txtFile], title: fileName });
-          showToast('Silakan pilih WhatsApp / Drive / File untuk menyimpan backup.');
-          return;
-        }
-      } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') {
-          return;
-        }
-      }
-
-      try {
-        await navigator.share({ title: fileName, text: jsonString });
-        showToast('Data backup berhasil dibagikan sebagai teks.');
         return;
-      } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') {
+      }
+
+      const blob = new Blob([jsonString], {
+        type: 'application/json;charset=utf-8;',
+      });
+
+      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+        const jsonFile = new File([blob], fileName, { type: 'application/json' });
+        const txtFile = new File([blob], fileName, { type: 'text/plain' });
+
+        try {
+          if (!navigator.canShare || navigator.canShare({ files: [jsonFile] })) {
+            await navigator.share({ files: [jsonFile], title: fileName });
+            const msg = 'File .json berhasil dibagikan.';
+            setBackupFeedback({ type: 'success', text: msg });
+            showToast(msg);
+            return;
+          }
+          if (navigator.canShare({ files: [txtFile] })) {
+            await navigator.share({ files: [txtFile], title: fileName });
+            const msg = 'File .json berhasil dibagikan.';
+            setBackupFeedback({ type: 'success', text: msg });
+            showToast(msg);
+            return;
+          }
+        } catch (err) {
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            return;
+          }
+        }
+
+        try {
+          await navigator.share({ title: fileName, text: jsonString });
+          const msg = 'Data backup berhasil dibagikan sebagai teks.';
+          setBackupFeedback({ type: 'success', text: msg });
+          showToast(msg);
+          return;
+        } catch (err) {
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            return;
+          }
+        }
+      }
+
+      if (isElectronDesktop()) {
+        const res = await saveTextFileDesktop(fileName, jsonString);
+        if (res.handled) {
+          if (!res.canceled && res.filePath) {
+            const msg = `Backup tersimpan di: ${res.filePath}`;
+            setBackupFeedback({ type: 'success', text: msg });
+            showToast(msg);
+          }
           return;
         }
       }
-    }
 
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.style.display = 'none';
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    setTimeout(() => {
-      URL.revokeObjectURL(url);
-      document.body.removeChild(link);
-    }, 150);
-    showToast(`File ${fileName} sedang diunduh (cek folder Download).`);
+      triggerBrowserBlobDownload(jsonString, fileName);
+      const msg = `File ${fileName} berhasil diunduh (cek folder Download).`;
+      setBackupFeedback({ type: 'success', text: msg });
+      showToast(msg);
+    } finally {
+      setBackupBusy(false);
+    }
   };
 
   const handleDownloadBackupFile = async () => {
     const jsonString = buildBackupJsonString();
     const fileName = makeBackupFileName();
+    setBackupBusy(true);
+    setBackupFeedback(null);
 
-    if (Capacitor.isNativePlatform()) {
-      try {
+    try {
+      if (isElectronDesktop()) {
         try {
-          const perm = await Filesystem.checkPermissions();
-          if (perm.publicStorage !== 'granted') {
-            await Filesystem.requestPermissions();
+          const res = await saveTextFileDesktop(fileName, jsonString);
+          if (res.handled) {
+            if (res.canceled) {
+              setBackupFeedback({ type: 'info', text: 'Penyimpanan file dibatalkan.' });
+            } else if (res.filePath) {
+              const msg = `Backup berhasil disimpan di: ${res.filePath}`;
+              setBackupFeedback({ type: 'success', text: msg });
+              showToast(msg);
+            }
+            return;
           }
         } catch {
-          // Android 11+ does not require legacy storage permission for app-created Documents files
+          // Fallback to browser download below if desktop bridge threw
+        }
+      }
+
+      if (Capacitor.isNativePlatform()) {
+        const attempts: Array<{
+          directory: Directory;
+          path: string;
+          label: string;
+          recursive: boolean;
+        }> = [
+          {
+            directory: Directory.Documents,
+            path: `NiagaAngkut/${fileName}`,
+            label: `Documents/NiagaAngkut/${fileName}`,
+            recursive: true,
+          },
+          {
+            directory: Directory.Documents,
+            path: fileName,
+            label: `Documents/${fileName}`,
+            recursive: false,
+          },
+          {
+            directory: Directory.External,
+            path: fileName,
+            label: `Android/data/com.niagaangkut.app/files/${fileName}`,
+            recursive: false,
+          },
+        ];
+
+        for (const attempt of attempts) {
+          try {
+            await Filesystem.writeFile({
+              path: attempt.path,
+              data: jsonString,
+              directory: attempt.directory,
+              encoding: Encoding.UTF8,
+              recursive: attempt.recursive,
+            });
+            const msg = `Backup berhasil tersimpan di HP: ${attempt.label}`;
+            setBackupFeedback({ type: 'success', text: msg });
+            showToast(msg);
+            return;
+          } catch {
+            // Try next directory option
+          }
         }
 
-        await Filesystem.writeFile({
-          path: `NiagaAngkut/${fileName}`,
-          data: jsonString,
-          directory: Directory.Documents,
-          encoding: Encoding.UTF8,
-          recursive: true,
-        });
-
-        showToast(
-          `Backup tersimpan di HP: folder Documents/NiagaAngkut/${fileName}`
-        );
-        return;
-      } catch {
-        // Fallback to Android share sheet if Documents write is unavailable on this device
-        await handleShareBackupFile(jsonString, fileName);
+        // If Android Scoped Storage blocked direct file write on this device, open Native Share Sheet
+        const shareStatus = await shareNativeAndroidBackup(jsonString, fileName);
+        if (shareStatus === 'shared') {
+          const msg =
+            'Izin folder Documents dibatasi HP. Gunakan menu Bagikan yang terbuka untuk menyimpan file .json ke File Manager / Drive / WA.';
+          setBackupFeedback({ type: 'info', text: msg });
+          showToast(msg);
+        } else if (shareStatus === 'canceled') {
+          setBackupFeedback({
+            type: 'info',
+            text: 'Penyimpanan dibatalkan. Anda bisa tekan "Bagikan File (.json)" atau "Salin Kode Backup" di bawah.',
+          });
+        } else {
+          setShowRawBackupText(true);
+          const msg =
+            'Gagal menyimpan langsung ke folder HP. Kode backup JSON sudah ditampilkan di bawah untuk disalin manual.';
+          setBackupFeedback({ type: 'error', text: msg });
+          showToast(msg);
+        }
         return;
       }
-    }
 
-    const blob = new Blob([jsonString], {
-      type: 'application/json;charset=utf-8;',
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.style.display = 'none';
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    setTimeout(() => {
-      URL.revokeObjectURL(url);
-      document.body.removeChild(link);
-    }, 150);
-    showToast(`File ${fileName} berhasil diunduh ke folder Download.`);
+      triggerBrowserBlobDownload(jsonString, fileName);
+      const msg = `File ${fileName} berhasil diunduh ke folder Download.`;
+      setBackupFeedback({ type: 'success', text: msg });
+      showToast(msg);
+    } finally {
+      setBackupBusy(false);
+    }
   };
 
   const handleCopyBackupJson = async () => {
-    try {
-      await navigator.clipboard.writeText(buildBackupJsonString());
+    const jsonString = buildBackupJsonString();
+    const ok = await copyTextWithFallback(jsonString);
+    if (ok) {
       setCopiedBackup(true);
-      showToast('Kode backup JSON tersalin. Anda bisa tempel ke WhatsApp/Catatan/PC.');
+      const msg = 'Kode backup JSON tersalin! Tempel ke WhatsApp, Catatan, atau PC.';
+      setBackupFeedback({ type: 'success', text: msg });
+      showToast(msg);
       setTimeout(() => setCopiedBackup(false), 2500);
-    } catch {
-      showToast('Gagal menyalin otomatis. Gunakan tombol Download / Bagikan File.');
+    } else {
+      setShowRawBackupText(true);
+      const msg =
+        'Salin otomatis diblokir perangkat. Teks JSON sudah dibuka di bawah — tekan & tahan lalu Pilih Semua → Salin.';
+      setBackupFeedback({ type: 'error', text: msg });
+      showToast(msg);
     }
   };
 
@@ -497,7 +708,7 @@ export default function App() {
 
         <button
           type="button"
-          onClick={() => setBackupModalOpen(true)}
+          onClick={openBackupModal}
           className="flex w-full min-h-[38px] items-center gap-2.5 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
         >
           <Download className="h-3.5 w-3.5 shrink-0" />
@@ -724,7 +935,7 @@ export default function App() {
           role="dialog"
           aria-modal="true"
         >
-          <div className="w-full max-w-md rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-2xl space-y-4">
+          <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-2xl space-y-4">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-base font-semibold text-slate-100">
@@ -744,29 +955,50 @@ export default function App() {
               </button>
             </div>
 
+            {backupFeedback && (
+              <div
+                className={`rounded-lg border px-3 py-2.5 text-xs leading-relaxed ${
+                  backupFeedback.type === 'success'
+                    ? 'border-emerald-700/80 bg-emerald-950/60 text-emerald-200'
+                    : backupFeedback.type === 'error'
+                      ? 'border-rose-700/80 bg-rose-950/60 text-rose-200'
+                      : 'border-blue-700/80 bg-blue-950/60 text-blue-200'
+                }`}
+              >
+                {backupFeedback.text}
+              </div>
+            )}
+
             <div className="space-y-2.5">
               <button
                 type="button"
+                disabled={backupBusy}
                 onClick={handleDownloadBackupFile}
-                className="flex w-full min-h-[42px] items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-500"
+                className="flex w-full min-h-[42px] items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-50"
               >
                 <Download className="h-4 w-4 shrink-0" />
-                <span>Unduh / Simpan File (.json) ke HP &amp; PC</span>
+                <span>
+                  {backupBusy
+                    ? 'Menyiapkan File Backup...'
+                    : 'Unduh / Simpan File (.json) ke HP & PC'}
+                </span>
               </button>
 
               <button
                 type="button"
+                disabled={backupBusy}
                 onClick={() => handleShareBackupFile()}
-                className="flex w-full min-h-[40px] items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
+                className="flex w-full min-h-[40px] items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800 disabled:opacity-50"
               >
                 <Share2 className="h-4 w-4 shrink-0" />
-                <span>Bagikan File (.json) ke WA / Drive</span>
+                <span>Bagikan File (.json) ke WA / Drive / File</span>
               </button>
 
               <button
                 type="button"
+                disabled={backupBusy}
                 onClick={handleCopyBackupJson}
-                className="flex w-full min-h-[40px] items-center justify-center gap-2 rounded-lg border border-emerald-700 bg-emerald-950/70 px-4 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-900/60"
+                className="flex w-full min-h-[40px] items-center justify-center gap-2 rounded-lg border border-emerald-700 bg-emerald-950/70 px-4 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-900/60 disabled:opacity-50"
               >
                 {copiedBackup ? (
                   <Check className="h-4 w-4 shrink-0 text-emerald-400" />
@@ -779,10 +1011,52 @@ export default function App() {
                     : 'Salin Kode Backup (untuk WA / Pindah ke PC)'}
                 </span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => setShowRawBackupText((prev) => !prev)}
+                className="flex w-full min-h-[36px] items-center justify-center gap-2 rounded-lg border border-slate-800 bg-slate-950/60 px-4 py-1.5 text-[11px] font-medium text-slate-300 hover:bg-slate-800"
+              >
+                <FileCode2 className="h-3.5 w-3.5 shrink-0" />
+                <span>
+                  {showRawBackupText
+                    ? 'Sembunyikan Teks Kode JSON'
+                    : 'Lihat / Pilih Manual Teks Kode JSON'}
+                </span>
+              </button>
             </div>
 
+            {showRawBackupText && (
+              <div className="space-y-2 border-t border-slate-800 pt-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-slate-300">
+                    Kode Backup JSON (Manual):
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      rawBackupTextareaRef.current?.focus();
+                      rawBackupTextareaRef.current?.select();
+                      handleCopyBackupJson();
+                    }}
+                    className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] font-medium text-slate-200 hover:bg-slate-700"
+                  >
+                    Pilih Semua &amp; Salin
+                  </button>
+                </div>
+                <textarea
+                  ref={rawBackupTextareaRef}
+                  readOnly
+                  rows={5}
+                  value={buildBackupJsonString()}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 p-2.5 font-mono text-[10px] text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                />
+              </div>
+            )}
+
             <p className="text-[11px] leading-relaxed text-slate-400">
-              Di aplikasi HP Android, file tersimpan langsung di folder <strong className="text-slate-200">Documents/NiagaAngkut/</strong> (atau folder <strong className="text-slate-200">Download</strong> di PC).
+              Di HP Android, file tersimpan ke folder <strong className="text-slate-200">Documents/NiagaAngkut/</strong> atau dapat langsung dikirim ke WhatsApp / Google Drive / File Manager lewat tombol Bagikan.
             </p>
           </div>
         </div>
@@ -936,7 +1210,7 @@ export default function App() {
         <div
           role="status"
           aria-live="polite"
-          className="no-print fixed bottom-4 right-4 z-50 max-w-sm rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-xs font-medium text-slate-100 shadow-2xl"
+          className="no-print fixed bottom-4 right-4 z-[70] max-w-sm rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-xs font-medium text-slate-100 shadow-2xl"
         >
           {toastMessage}
         </div>

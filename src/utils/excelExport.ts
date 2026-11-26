@@ -1,3 +1,6 @@
+import { Capacitor } from '@capacitor/core';
+import { Directory, Filesystem } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 import writeXlsxFile from 'write-excel-file/browser';
 import type {
   Cell,
@@ -14,6 +17,16 @@ type SheetOptionsColumn = { width?: number };
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
 async function saveWorkbookFile(
   rows: SheetData,
   sheetOptions: SheetOptions<BrowserFileContent>,
@@ -22,11 +35,40 @@ async function saveWorkbookFile(
 ): Promise<void> {
   const blob = await writeXlsxFile(rows, sheetOptions, options).toBlob();
 
-  const isNativeCapacitor = Boolean(
-    (window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.()
-  );
+  if (Capacitor.isNativePlatform()) {
+    const base64 = arrayBufferToBase64(await blob.arrayBuffer());
+    try {
+      await Filesystem.writeFile({
+        path: `NiagaAngkut/${fileName}`,
+        data: base64,
+        directory: Directory.Documents,
+        recursive: true,
+      });
+    } catch {
+      // Ignore direct Documents failure and proceed to native Share sheet
+    }
 
-  if (isNativeCapacitor && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+    try {
+      const cacheRes = await Filesystem.writeFile({
+        path: fileName,
+        data: base64,
+        directory: Directory.Cache,
+      });
+      const uri =
+        cacheRes.uri ||
+        (await Filesystem.getUri({ directory: Directory.Cache, path: fileName })).uri;
+      await Share.share({
+        title: fileName,
+        files: [uri],
+        dialogTitle: 'Simpan / Bagikan File Excel',
+      });
+      return;
+    } catch {
+      return;
+    }
+  }
+
+  if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
     try {
       const file = new File([blob], fileName, { type: XLSX_MIME });
       if (!navigator.canShare || navigator.canShare({ files: [file] })) {
@@ -50,8 +92,10 @@ async function saveWorkbookFile(
   link.click();
   setTimeout(() => {
     URL.revokeObjectURL(url);
-    document.body.removeChild(link);
-  }, 150);
+    if (link.parentNode) {
+      link.parentNode.removeChild(link);
+    }
+  }, 10000);
 }
 
 const BORDER_THIN = {

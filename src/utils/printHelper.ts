@@ -2,6 +2,12 @@ export interface NiagaDesktopBridge {
   isElectron?: boolean;
   printPage?: () => Promise<{ success: boolean; reason?: string }>;
   savePdf?: (defaultFileName: string) => Promise<{ canceled: boolean; filePath?: string }>;
+  saveFile?: (payload: {
+    defaultFileName: string;
+    content: string;
+    filterName?: string;
+    extensions?: string[];
+  }) => Promise<{ canceled: boolean; filePath?: string }>;
 }
 
 function getDesktopBridge(): NiagaDesktopBridge | undefined {
@@ -13,6 +19,29 @@ export function isElectronDesktop(): boolean {
   const bridge = getDesktopBridge();
   if (bridge?.isElectron) return true;
   return typeof navigator !== 'undefined' && /Electron/i.test(navigator.userAgent);
+}
+
+export async function saveTextFileDesktop(
+  defaultFileName: string,
+  content: string,
+  filterName = 'File Backup JSON',
+  extensions: string[] = ['json']
+): Promise<{ handled: boolean; canceled?: boolean; filePath?: string }> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.saveFile) {
+    return { handled: false };
+  }
+  const res = await bridge.saveFile({
+    defaultFileName,
+    content,
+    filterName,
+    extensions,
+  });
+  return {
+    handled: true,
+    canceled: res.canceled,
+    filePath: res.filePath,
+  };
 }
 
 export async function printCurrentPage(): Promise<void> {
